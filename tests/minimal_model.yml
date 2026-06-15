@@ -1,7 +1,25 @@
 ---
 architecture_model:
   version: 1
-  nodes: {}
+  nodes:
+    hub01:
+      role: hub
+    edge01:
+      role: peer
   sites: {}
-  networks: {}
+  networks:
+    overlay01:
+      type: wireguard
+      topology: star
+      hub: hub01
+      defaults:
+        allowed_ips:
+          - 198.51.100.1/32
+      peers:
+        edge01:
+          host: edge01
+          address: 198.51.100.2/32
+          extensions:
+            example:
+              note: test-only
   transports: {}

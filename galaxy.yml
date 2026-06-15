@@ -14,4 +14,6 @@ tags:
   - models
   - linux
   - openwrt
+  - validation
+  - networking
 dependencies: {}

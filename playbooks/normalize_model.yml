@@ -3,5 +3,13 @@
   hosts: localhost
   gather_facts: false
 
+  pre_tasks:
+    - name: Load architecture model when model files are provided
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+      when:
+        - architecture_model is not defined
+        - architecture_model_files | default([]) | length > 0
+
   roles:
     - role: ansible_common.core.model_normalize

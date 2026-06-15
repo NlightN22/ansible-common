@@ -25,3 +25,17 @@
       - architecture_model.metadata | default({}) is mapping
       - architecture_model.extensions | default({}) is mapping
     fail_msg: "Optional architecture_model sections must be mappings when present."
+
+- name: Collect architecture model validation errors
+  ansible.builtin.set_fact:
+    architecture_model_validation_errors: >-
+      {{
+        architecture_model
+        | ansible_common.core.architecture_validate(architecture_model_supported_versions)
+      }}
+
+- name: Validate architecture model contract
+  ansible.builtin.assert:
+    that:
+      - architecture_model_validation_errors | length == 0
+    fail_msg: "{{ architecture_model_validation_errors }}"

@@ -1,0 +1,27 @@
+---
+- name: Diagnose architecture model
+  hosts: localhost
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load architecture model when model files are provided
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+      when:
+        - architecture_model is not defined
+        - architecture_model_files | default([]) | length > 0
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+  tasks:
+    - name: Show architecture model summary
+      ansible.builtin.debug:
+        msg:
+          version: "{{ resolved_architecture.version }}"
+          nodes: "{{ resolved_architecture.nodes | length }}"
+          sites: "{{ resolved_architecture.sites | length }}"
+          networks: "{{ resolved_architecture.networks | length }}"
+          transports: "{{ resolved_architecture.transports | length }}"
+          domain_controller_topologies: "{{ resolved_architecture.domain_controllers | length }}"

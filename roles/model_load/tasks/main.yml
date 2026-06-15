@@ -1,0 +1,48 @@
+---
+- name: Validate architecture model file list
+  ansible.builtin.assert:
+    that:
+      - architecture_model_files is sequence
+      - architecture_model_files is not string
+    fail_msg: "architecture_model_files must be a list of model file paths."
+
+- name: Require at least one architecture model file
+  ansible.builtin.assert:
+    that:
+      - architecture_model_files | length > 0
+    fail_msg: "Set architecture_model_files to one or more model files."
+  when: architecture_model_load_required | bool
+
+- name: Initialize loaded architecture model fragments
+  ansible.builtin.set_fact:
+    architecture_model_fragments: []
+
+- name: Load architecture model fragments
+  ansible.builtin.include_vars:
+    file: "{{ architecture_model_file }}"
+    name: architecture_model_loaded_fragment
+  loop: "{{ architecture_model_files }}"
+  loop_control:
+    loop_var: architecture_model_file
+    label: "{{ architecture_model_file }}"
+  register: architecture_model_loaded_fragments
+
+- name: Collect architecture model fragments
+  ansible.builtin.set_fact:
+    architecture_model_fragments: >-
+      {{
+        architecture_model_fragments
+        + [architecture_model_loaded_result.ansible_facts.architecture_model_loaded_fragment]
+      }}
+  loop: "{{ architecture_model_loaded_fragments.results }}"
+  loop_control:
+    loop_var: architecture_model_loaded_result
+    label: "{{ architecture_model_loaded_result.ansible_included_var_files | default([]) | first | default('fragment') }}"
+
+- name: Publish architecture model
+  ansible.builtin.set_fact:
+    architecture_model: >-
+      {{
+        architecture_model_fragments
+        | ansible_common.core.architecture_model_from_fragments(architecture_model_version)
+      }}

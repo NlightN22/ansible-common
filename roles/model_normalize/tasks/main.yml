@@ -5,4 +5,8 @@
 
 - name: Publish normalized architecture model
   ansible.builtin.set_fact:
-    "{{ architecture_model_normalized_var }}": "{{ architecture_model }}"
+    "{{ architecture_model_normalized_var }}": >-
+      {{
+        architecture_model
+        | ansible_common.core.architecture_normalize
+      }}

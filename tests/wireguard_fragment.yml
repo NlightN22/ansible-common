@@ -1,0 +1,11 @@
+---
+wireguard_site:
+  id: example_wg
+  hub_host: hub01
+  network_cidr: 198.51.100.0/24
+  hub_address: 198.51.100.1/32
+  hub_allowed_ips:
+    - 198.51.100.1/32
+  spokes:
+    - host: edge01
+      address: 198.51.100.2/32

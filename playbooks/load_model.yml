@@ -1,0 +1,7 @@
+---
+- name: Load architecture model
+  hosts: localhost
+  gather_facts: false
+
+  roles:
+    - role: ansible_common.core.model_load

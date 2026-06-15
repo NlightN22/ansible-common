@@ -1,0 +1,29 @@
+---
+- name: Render normalized network model
+  hosts: localhost
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load architecture model when model files are provided
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+      when:
+        - architecture_model is not defined
+        - architecture_model_files | default([]) | length > 0
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+  tasks:
+    - name: Render normalized networks to output file
+      ansible.builtin.copy:
+        dest: "{{ architecture_model_render_output | mandatory }}"
+        content: "{{ resolved_architecture.networks | to_nice_yaml }}"
+        mode: "0644"
+      when: architecture_model_render_output is defined
+
+    - name: Show normalized networks
+      ansible.builtin.debug:
+        var: resolved_architecture.networks
+      when: architecture_model_render_output is not defined
