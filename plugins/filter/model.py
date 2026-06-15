@@ -15,6 +15,7 @@ MODEL_SECTIONS = (
     "sites",
     "networks",
     "transports",
+    "directory_topologies",
     "domain_controllers",
     "metadata",
     "extensions",
@@ -60,6 +61,7 @@ def _blank_model(version: int = MODEL_VERSION) -> dict[str, Any]:
         "sites": {},
         "networks": {},
         "transports": {},
+        "directory_topologies": {},
         "domain_controllers": {},
         "metadata": {},
         "extensions": {},
@@ -97,6 +99,15 @@ def _mapping_from_peer_list(peers: Any) -> dict[str, Any]:
     return result
 
 
+def _wireguard_peer_defaults(source: dict[str, Any]) -> dict[str, Any]:
+    defaults = {}
+    if source.get("hub_allowed_ips") is not None:
+        defaults["allowed_ips"] = deepcopy(source["hub_allowed_ips"])
+    if source.get("interface_name") is not None:
+        defaults["interface_name"] = deepcopy(source["interface_name"])
+    return defaults
+
+
 def _add_star_network(
     model: dict[str, Any],
     source: dict[str, Any],
@@ -116,14 +127,17 @@ def _add_star_network(
     for peer_id, peer in peers.items():
         _remember_node(model, peer.get("host") if isinstance(peer, dict) else peer_id, peer if isinstance(peer, dict) else {})
     _remember_node(model, hub)
-    network = {
+    network = deepcopy(source)
+    if network_type == "wireguard":
+        network["defaults"] = _deep_merge(_wireguard_peer_defaults(source), network.get("defaults", {}))
+    network = _deep_merge(network, {
         "id": network_id,
         "type": network_type,
         "topology": "star",
         "hub": hub,
         "peers": peers,
         "source": deepcopy(source),
-    }
+    })
     model["networks"][network_id] = _deep_merge(model["networks"].get(network_id, {}), network)
 
 
@@ -150,6 +164,10 @@ def architecture_model_from_fragments(fragments: Any, version: int = MODEL_VERSI
         if "ad_replication_topology" in fragment:
             topology = _as_mapping(fragment["ad_replication_topology"], "ad_replication_topology")
             topology_id = str(topology.get("id") or "domain_controller_topology")
+            model["directory_topologies"][topology_id] = _deep_merge(
+                model["directory_topologies"].get(topology_id, {}),
+                topology,
+            )
             model["domain_controllers"][topology_id] = _deep_merge(
                 model["domain_controllers"].get(topology_id, {}),
                 topology,
@@ -181,6 +199,65 @@ def architecture_get_peers(network: dict[str, Any]) -> dict[str, Any]:
 
 def architecture_is_hub(network: dict[str, Any], node_id: str) -> bool:
     return architecture_get_hub(network) == node_id
+
+
+def _network_hub_member(network: dict[str, Any]) -> dict[str, Any]:
+    source = network.get("source", {})
+    hub_member = source.get("hub") if isinstance(source, dict) else None
+    if isinstance(hub_member, dict):
+        return _deep_merge({"role": "hub", "host": network.get("hub")}, hub_member)
+    return {"role": "hub", "host": network.get("hub")}
+
+
+def architecture_network_member(network: dict[str, Any], node_id: str) -> dict[str, Any] | None:
+    network = _as_mapping(network, "network")
+    if architecture_is_hub(network, node_id):
+        return _network_hub_member(network)
+    for peer_id, peer in architecture_get_peers(network).items():
+        if not isinstance(peer, dict):
+            peer = {"id": peer_id, "host": peer_id}
+        if peer_id == node_id or peer.get("host") == node_id:
+            return _deep_merge({"id": peer_id, "host": peer.get("host", peer_id)}, peer)
+    return None
+
+
+def architecture_wireguard_view(
+    model: dict[str, Any],
+    network_id: str,
+    node_id: str | None = None,
+) -> dict[str, Any]:
+    model = _as_mapping(model, "architecture_model")
+    network = architecture_get_network(model, network_id)
+    if not isinstance(network, dict):
+        raise AnsibleFilterError(f"WireGuard network {network_id!r} is not defined")
+    if network.get("type") != "wireguard":
+        raise AnsibleFilterError(f"Network {network_id!r} must have type 'wireguard'")
+
+    view = deepcopy(network)
+    source = view.get("source", {})
+    peers = architecture_get_peers(view)
+    active_peers = {
+        peer_id: peer
+        for peer_id, peer in peers.items()
+        if isinstance(peer, dict) and peer.get("active", True)
+    }
+    hub_member = _network_hub_member(view)
+    view["hub_member"] = hub_member
+    view["peers"] = peers
+    view["active_peers"] = active_peers
+    view["members"] = _deep_merge({str(view.get("hub")): hub_member}, active_peers)
+    view["hub_allowed_ips"] = view.get("hub_allowed_ips", source.get("hub_allowed_ips", []))
+    view["interface_name"] = view.get("interface_name", source.get("interface_name"))
+    view["endpoint"] = view.get("endpoint", source.get("endpoint", {}))
+    view["network_cidr"] = view.get("network_cidr", source.get("network_cidr"))
+    view["preferred_transport"] = view.get("preferred_transport", source.get("preferred_transport", {}))
+    if node_id:
+        member = architecture_network_member(view, node_id)
+        view["current_member"] = member
+        view["is_hub"] = architecture_is_hub(view, node_id)
+        if member is not None:
+            view["current_host"] = member.get("host", node_id)
+    return view
 
 
 def architecture_extension(entity: dict[str, Any], namespace: str, default: Any = None) -> Any:
@@ -280,5 +357,7 @@ class FilterModule(object):
             "architecture_get_hub": architecture_get_hub,
             "architecture_get_peers": architecture_get_peers,
             "architecture_is_hub": architecture_is_hub,
+            "architecture_network_member": architecture_network_member,
+            "architecture_wireguard_view": architecture_wireguard_view,
             "architecture_extension": architecture_extension,
         }

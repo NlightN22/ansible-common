@@ -1,0 +1,2 @@
+---
+wireguard_openwrt_healthcheck_require_openwrt_group: true

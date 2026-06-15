@@ -25,7 +25,8 @@ Recommended sections:
 - `sites`: logical or physical sites.
 - `networks`: logical networks and overlay networks.
 - `transports`: transport candidates and routing preferences.
-- `domain_controllers`: optional directory-service topology.
+- `directory_topologies`: optional directory-service topology.
+- `domain_controllers`: deprecated compatibility alias for directory-service topology.
 - `metadata`: project-neutral descriptive metadata.
 - `extensions`: environment-specific data preserved by common logic.
 
@@ -68,7 +69,7 @@ The loader accepts either canonical `architecture_model` files or known raw mode
 - `wireguard_site` becomes a `networks` entry with `type: wireguard`.
 - `xp2p_star` becomes a `networks` entry with `type: xp2p`.
 - `three_x_ui_star` becomes a `networks` entry with `type: xray_overlay`.
-- `ad_replication_topology` becomes a `domain_controllers` entry.
+- `ad_replication_topology` becomes a `directory_topologies` entry and is also exposed through the deprecated `domain_controllers` compatibility alias.
 
 This compatibility layer is for loading existing environment models without copying those models into common.
 
@@ -78,6 +79,38 @@ Unknown `extensions` keys must be preserved during normalization. Common roles m
 
 ## Normalized Output
 
-Model normalization publishes `resolved_architecture`.
-
 Normalization publishes a stable `resolved_architecture` object. Version 1 preserves extensions, keeps the raw source under converted network entries, converts peer lists into peer maps, and applies network-level `defaults` followed by peer-level `overrides`.
+
+When `network_id` selects a WireGuard network, normalization also publishes `resolved_wireguard_network` for the current host. This capability view contains the normalized network data, `hub_member`, `members`, `active_peers`, `current_member`, and `is_hub`. Reusable WireGuard playbooks and roles should consume this resolved view instead of reading legacy `wireguard_site` directly.
+
+## WireGuard Star Example
+
+```yaml
+architecture_model:
+  version: 1
+  nodes:
+    hub01:
+      role: hub
+      platform: linux
+    edge01:
+      role: peer
+      platform: openwrt
+  networks:
+    wg_main:
+      type: wireguard
+      topology: star
+      hub: hub01
+      interface_name: wg_main
+      network_cidr: 198.51.100.0/24
+      hub_address: 198.51.100.1/32
+      hub_allowed_ips:
+        - 198.51.100.1/32
+      endpoint:
+        host: 203.0.113.10
+        port: 51820
+      peers:
+        edge01:
+          host: edge01
+          address: 198.51.100.2/32
+          lan_cidr: 192.0.2.0/24
+```

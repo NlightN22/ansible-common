@@ -10,3 +10,14 @@
         architecture_model
         | ansible_common.core.architecture_normalize
       }}
+
+- name: Publish selected WireGuard network view
+  ansible.builtin.set_fact:
+    resolved_wireguard_network: >-
+      {{
+        lookup('ansible.builtin.vars', architecture_model_normalized_var)
+        | ansible_common.core.architecture_wireguard_view(network_id, inventory_hostname)
+      }}
+  when:
+    - network_id is defined
+    - (lookup('ansible.builtin.vars', architecture_model_normalized_var)).networks.get(network_id, {}).type | default('') == 'wireguard'

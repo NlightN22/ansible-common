@@ -1,0 +1,128 @@
+---
+- name: Validate selected WireGuard OpenWrt network
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network is defined
+      - resolved_wireguard_network is mapping
+      - resolved_wireguard_network.current_member is mapping
+      - resolved_wireguard_network.current_member.active | default(true) | bool
+      - not (wireguard_openwrt_healthcheck_require_openwrt_group | bool) or 'openwrt' in group_names
+      - resolved_wireguard_network.interface_name is defined
+      - resolved_wireguard_network.endpoint.host is defined
+      - resolved_wireguard_network.hub_allowed_ips | length > 0
+    fail_msg: >-
+      Host {{ inventory_hostname }} is not an active OpenWrt member of
+      WireGuard network {{ network_id | default(resolved_wireguard_network.id | default('unknown')) }}.
+
+- name: Select WireGuard OpenWrt healthcheck targets
+  ansible.builtin.set_fact:
+    wireguard_openwrt_health_addresses: >-
+      {{
+        resolved_wireguard_network.hub_allowed_ips
+        | map('regex_replace', '/.*$', '')
+        | list
+      }}
+    wireguard_openwrt_health_ping_addresses: >-
+      {{
+        (
+          [resolved_wireguard_network.hub_address | regex_replace('/.*$', '')]
+          if not (resolved_wireguard_network.is_hub | bool)
+          else (
+            resolved_wireguard_network.active_peers
+            | dict2items
+            | map(attribute='value.address')
+            | select('defined')
+            | map('regex_replace', '/.*$', '')
+            | list
+          )
+        )
+      }}
+
+- name: Check OpenWrt WireGuard and route state
+  ansible.builtin.raw: |
+    set +e
+    rc=0
+    check_uci_value() {
+      key="$1"
+      expected="$2"
+      actual="$(uci -q get "$key" 2>/dev/null || true)"
+      if [ "$actual" != "$expected" ]; then
+        echo "UCI_MISMATCH key=${key} expected=${expected} actual=${actual:-<missing>}"
+        rc=1
+      fi
+    }
+    echo '### wg'
+    wg show {{ resolved_wireguard_network.interface_name }} || rc=1
+    echo '### endpoint route'
+    ip route get {{ resolved_wireguard_network.endpoint.host }} || rc=1
+    {% for address in wireguard_openwrt_health_ping_addresses %}
+    echo '### ping {{ address }}'
+    ping -c 3 {{ address }} || rc=1
+    {% endfor %}
+    {% for address in wireguard_openwrt_health_addresses %}
+    {% if not (resolved_wireguard_network.is_hub | bool) %}
+    echo '### route {{ address }}'
+    ip route get {{ address }} || rc=1
+    {% endif %}
+    {% endfor %}
+    echo '### endpoint route uci'
+    {% if not (resolved_wireguard_network.is_hub | bool) %}
+    {% if resolved_wireguard_network.preferred_transport.interface is defined and resolved_wireguard_network.preferred_transport.route is defined and resolved_wireguard_network.preferred_transport.route.section is defined %}
+    check_uci_value network.{{ resolved_wireguard_network.preferred_transport.route.section }} route
+    check_uci_value network.{{ resolved_wireguard_network.preferred_transport.route.section }}.interface {{ resolved_wireguard_network.preferred_transport.interface }}
+    check_uci_value network.{{ resolved_wireguard_network.preferred_transport.route.section }}.target {{ resolved_wireguard_network.endpoint.host }}
+    check_uci_value network.{{ resolved_wireguard_network.preferred_transport.route.section }}.netmask 255.255.255.255
+    uci -q get network.{{ resolved_wireguard_network.preferred_transport.route.section }}.disabled || true
+    {% else %}
+    echo 'unmanaged endpoint route'
+    {% endif %}
+    {% else %}
+    echo 'skipped on hub'
+    {% endif %}
+    echo '### WireGuard route uci'
+    {% if not (resolved_wireguard_network.is_hub | bool) %}
+    {% for target in resolved_wireguard_network.hub_allowed_ips %}
+    check_uci_value network.{{ resolved_wireguard_network.id }}_wg_hub_route_{{ loop.index }} route
+    check_uci_value network.{{ resolved_wireguard_network.id }}_wg_hub_route_{{ loop.index }}.interface {{ resolved_wireguard_network.interface_name }}
+    check_uci_value network.{{ resolved_wireguard_network.id }}_wg_hub_route_{{ loop.index }}.target {{ target | regex_replace('/32$', '') }}
+    {% if target is search('/32$') %}
+    check_uci_value network.{{ resolved_wireguard_network.id }}_wg_hub_route_{{ loop.index }}.netmask 255.255.255.255
+    {% elif target is search('/24$') %}
+    check_uci_value network.{{ resolved_wireguard_network.id }}_wg_hub_route_{{ loop.index }}.netmask 255.255.255.0
+    {% elif target is search('/23$') %}
+    check_uci_value network.{{ resolved_wireguard_network.id }}_wg_hub_route_{{ loop.index }}.netmask 255.255.254.0
+    {% else %}
+    echo 'Unsupported route prefix in {{ target }}' >&2
+    rc=1
+    {% endif %}
+    {% endfor %}
+    {% else %}
+    echo 'skipped on hub'
+    {% endif %}
+    echo '### firewall'
+    uci show firewall | grep -E '{{ resolved_wireguard_network.interface_name }}' || true
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }} zone
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}.name {{ resolved_wireguard_network.interface_name }}
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}.input ACCEPT
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}.output ACCEPT
+    {% if resolved_wireguard_network.current_member.lan_cidr is defined %}
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq nat
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.name {{ resolved_wireguard_network.interface_name }}-to-lan-masquerade
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.family ipv4
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.src lan
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.src_ip {{ resolved_wireguard_network.network_cidr }}
+    check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.target MASQUERADE
+    {% endif %}
+    echo '### xp2p redirects'
+    xp2p client redirect list || true
+    exit "$rc"
+  register: wireguard_openwrt_health
+  changed_when: false
+
+- name: Validate OpenWrt WireGuard route state
+  ansible.builtin.assert:
+    that:
+      - "'### wg' in wireguard_openwrt_health.stdout"
+      - resolved_wireguard_network.is_hub | bool or 'dev ' ~ resolved_wireguard_network.interface_name in wireguard_openwrt_health.stdout
+      - resolved_wireguard_network.is_hub | bool or resolved_wireguard_network.endpoint.host in wireguard_openwrt_health.stdout
+    fail_msg: "WireGuard OpenWrt healthcheck failed on {{ inventory_hostname }}."
