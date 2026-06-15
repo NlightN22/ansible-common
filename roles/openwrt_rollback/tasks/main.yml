@@ -1,0 +1,98 @@
+---
+- name: Ensure OpenWrt rollback directories exist
+  ansible.builtin.raw: |
+    mkdir -p {{ openwrt_rollback_runtime_dir }} {{ openwrt_rollback_backup_dir }} "$(dirname {{ openwrt_rollback_log_path }})"
+    touch {{ openwrt_rollback_log_path }}
+  changed_when: false
+
+- name: Install OpenWrt rollback script
+  ansible.builtin.raw: |
+    cat > {{ openwrt_rollback_script }} <<'EOF'
+    #!/bin/sh
+    set -u
+
+    runtime_dir="{{ openwrt_rollback_runtime_dir }}"
+    persistent_dir="{{ openwrt_rollback_persistent_dir }}"
+    backup_dir="{{ openwrt_rollback_backup_dir }}"
+    marker="{{ openwrt_rollback_marker_path }}"
+    pid_path="{{ openwrt_rollback_pid_path }}"
+    log_path="{{ openwrt_rollback_log_path }}"
+    soft_delay="{{ openwrt_rollback_soft_delay_seconds }}"
+    hard_delay="{{ openwrt_rollback_hard_delay_seconds }}"
+
+    log() {
+      mkdir -p "$(dirname "$log_path")"
+      timestamp="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)"
+      printf '%s %s\n' "$timestamp" "$*" >> "$log_path"
+    }
+
+    cleanup() {
+      current_pid="$$"
+      if [ -f "$pid_path" ] && [ "$(cat "$pid_path" 2>/dev/null)" = "$current_pid" ]; then
+        rm -f "$pid_path"
+      fi
+    }
+
+    trap cleanup EXIT
+
+    log "rollback guard started: soft_delay=${soft_delay}s hard_delay=${hard_delay}s runtime_dir=$runtime_dir persistent_dir=$persistent_dir"
+    sleep "$soft_delay"
+
+    if [ ! -f "$marker" ]; then
+      log "rollback guard disarmed before soft stage"
+      exit 0
+    fi
+
+    log "soft rollback started"
+
+    find "$backup_dir" -type f -name '*.backup' | while IFS= read -r backup; do
+      [ -f "$backup" ] || continue
+      target="${backup#$backup_dir}"
+      target="${target%.backup}"
+      mkdir -p "$(dirname "$target")"
+      if cp -p "$backup" "$target"; then
+        log "restored $target from $backup"
+      else
+        log "failed to restore $target from $backup"
+      fi
+    done
+
+    if [ -f "$backup_dir/etc/config/network.backup" ]; then
+      log "restarting network"
+      /etc/init.d/network restart >> "$log_path" 2>&1 || log "network restart failed"
+    fi
+
+    if [ -f "$backup_dir/etc/config/firewall.backup" ]; then
+      log "restarting firewall"
+      /etc/init.d/firewall restart >> "$log_path" 2>&1 || log "firewall restart failed"
+    fi
+
+    log "soft rollback finished; waiting for cancel before hard stage"
+    sleep "$hard_delay"
+
+    if [ ! -f "$marker" ]; then
+      log "rollback guard disarmed after soft stage"
+      exit 0
+    fi
+
+    log "hard rollback started: marker still present, rebooting"
+    sync
+    reboot
+    EOF
+    chmod 0700 {{ openwrt_rollback_script }}
+  changed_when: true
+
+- name: Create OpenWrt rollback backups for managed paths
+  ansible.builtin.raw: |
+    path="{{ item }}"
+    backup="{{ openwrt_rollback_backup_dir }}${path}.backup"
+    mkdir -p "$(dirname "$backup")"
+    if [ -f "$path" ]; then
+      cp -p "$path" "$backup"
+    fi
+  loop: "{{ openwrt_rollback_paths }}"
+  changed_when: true
+
+- name: Leave OpenWrt rollback disarmed by default
+  ansible.builtin.raw: "rm -f {{ openwrt_rollback_marker_path }}"
+  changed_when: false

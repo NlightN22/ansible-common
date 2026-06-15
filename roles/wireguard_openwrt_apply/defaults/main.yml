@@ -1,0 +1,14 @@
+---
+wireguard_openwrt_apply_confirm: false
+wireguard_openwrt_apply_require_openwrt_group: true
+wireguard_openwrt_apply_packages:
+  - kmod-wireguard
+  - wireguard-tools
+  - luci-proto-wireguard
+wireguard_openwrt_apply_update_package_index: true
+wireguard_openwrt_apply_restart_network_after_package_install: true
+wireguard_openwrt_apply_restart_network: true
+wireguard_openwrt_apply_wait_for_ssh_after_network_reload: true
+wireguard_openwrt_apply_restart_firewall: true
+wireguard_openwrt_apply_hide_log: true
+wireguard_openwrt_apply_inline_verify_enabled: true

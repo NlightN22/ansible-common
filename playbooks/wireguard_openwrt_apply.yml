@@ -1,0 +1,51 @@
+---
+- name: Apply WireGuard OpenWrt members one router at a time
+  hosts: "{{ target_group | default(wireguard_openwrt_target_group) | mandatory }}"
+  gather_facts: false
+  serial: 1
+
+  pre_tasks:
+    - name: Load architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+  tasks:
+    - name: Skip inactive WireGuard model entries
+      ansible.builtin.meta: end_host
+      when: not (resolved_wireguard_network.current_member.active | default(true) | bool)
+
+    - name: Prepare rollback guard for OpenWrt network changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+      when: wireguard_openwrt_rollback_enabled | default(true) | bool
+
+    - name: Arm rollback guard before WireGuard changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+        tasks_from: arm
+      when: wireguard_openwrt_rollback_enabled | default(true) | bool
+
+    - name: Apply and verify WireGuard member
+      block:
+        - name: Configure WireGuard member
+          ansible.builtin.include_role:
+            name: ansible_common.core.wireguard_openwrt_apply
+
+        - name: Cancel rollback guard after successful verification
+          ansible.builtin.include_role:
+            name: ansible_common.core.openwrt_rollback
+            tasks_from: cancel
+          when:
+            - not ansible_check_mode
+            - wireguard_openwrt_rollback_enabled | default(true) | bool
+
+      rescue:
+        - name: Leave rollback guard armed after failed WireGuard apply
+          ansible.builtin.fail:
+            msg: >-
+              WireGuard apply failed on {{ inventory_hostname }}; rollback guard
+              {{ 'remains armed' if (wireguard_openwrt_rollback_enabled | default(true) | bool) else 'was disabled for this run' }}.

@@ -1,0 +1,261 @@
+#!/bin/sh
+# Managed by Ansible. Source: roles/openwrt_wireguard/templates/openwrt-wireguard-apply.sh.j2
+set -eu
+
+interface_name='{{ openwrt_wireguard_apply_member.interface_name | default(openwrt_wireguard_apply_site.interface_name) }}'
+site_id='{{ openwrt_wireguard_apply_site_id }}'
+spoke_address='{{ openwrt_wireguard_apply_member.address }}'
+spoke_private_key='{{ openwrt_wireguard_apply_member.private_key }}'
+hub_public_key='{{ wireguard_hub_public_key }}'
+endpoint_host='{{ openwrt_wireguard_apply_site.endpoint.host }}'
+endpoint_port='{{ openwrt_wireguard_apply_site.endpoint.port }}'
+{% set endpoint_route_managed = openwrt_wireguard_apply_site.preferred_transport.interface is defined and openwrt_wireguard_apply_site.preferred_transport.route is defined and openwrt_wireguard_apply_site.preferred_transport.route.section is defined %}
+{% if endpoint_route_managed %}
+endpoint_route_interface='{{ openwrt_wireguard_apply_site.preferred_transport.interface }}'
+endpoint_route_section='{{ openwrt_wireguard_apply_site.preferred_transport.route.section }}'
+{% endif %}
+host_role='{{ openwrt_wireguard_apply_member.role | default("spoke") }}'
+wireguard_network_cidr='{{ openwrt_wireguard_apply_site.network_cidr }}'
+network_changed=false
+firewall_changed=false
+
+checksum_file() {
+  if [ -f "$1" ]; then
+    if command -v cksum >/dev/null 2>&1; then
+      cksum "$1" | awk '{print $1 ":" $2}'
+    else
+      md5sum "$1" | awk '{print $1}'
+    fi
+  else
+    echo missing
+  fi
+}
+
+before_network="$(checksum_file /etc/config/network)"
+before_firewall="$(checksum_file /etc/config/firewall)"
+
+delete_named_section() {
+  config="$1"
+  section="$2"
+
+  uci -q delete "${config}.${section}" || true
+}
+
+delete_route_target() {
+  route_target="$1"
+  route_target_plain="${route_target%/32}"
+
+  uci -q show network |
+    sed -n "s/^\([^=]*\)=route$/\1/p" |
+    while read -r section; do
+      target="$(uci -q get "${section}.target" || true)"
+      [ "$target" = "$route_target" ] || [ "$target" = "$route_target_plain" ] || continue
+      uci -q delete "$section" || true
+    done
+}
+
+find_wireguard_peer_section() {
+  peer_description="$1"
+  peer_public_key="$2"
+
+  uci -q show network |
+    sed -n "s/^\([^=]*\)=wireguard_${interface_name}$/\1/p" |
+    while read -r section; do
+      description="$(uci -q get "${section}.description" || true)"
+      public_key="$(uci -q get "${section}.public_key" || true)"
+      if [ "$description" = "$peer_description" ] || [ "$public_key" = "$peer_public_key" ]; then
+        echo "${section#network.}"
+        break
+      fi
+    done
+}
+
+delete_duplicate_wireguard_peer_sections() {
+  keep_section="$1"
+  peer_description="$2"
+  peer_public_key="$3"
+
+  uci -q show network |
+    sed -n "s/^\([^=]*\)=wireguard_${interface_name}$/\1/p" |
+    while read -r section; do
+      [ "${section#network.}" != "$keep_section" ] || continue
+      description="$(uci -q get "${section}.description" || true)"
+      public_key="$(uci -q get "${section}.public_key" || true)"
+      if [ "$description" = "$peer_description" ] || [ "$public_key" = "$peer_public_key" ]; then
+        uci -q delete "$section" || true
+      fi
+    done
+}
+
+if [ "$host_role" = hub ]; then
+  uci -q show network |
+    sed -n "s/^\([^=]*\)=wireguard_${interface_name}$/\1/p" |
+    while read -r section; do
+      description="$(uci -q get "${section}.description" || true)"
+      case "$description" in
+{% for peer in openwrt_wireguard_site_members if peer.host != openwrt_wireguard_apply_site.hub_host and (peer.active | default(true)) %}
+        "{{ peer.host }}") ;;
+{% endfor %}
+        *) uci -q delete "$section" || true ;;
+      esac
+    done
+else
+  uci -q show network |
+    sed -n "s/^\([^=]*\)=wireguard_${interface_name}$/\1/p" |
+    while read -r section; do
+      description="$(uci -q get "${section}.description" || true)"
+      public_key="$(uci -q get "${section}.public_key" || true)"
+      endpoint="$(uci -q get "${section}.endpoint_host" || true)"
+      if [ "$description" != '{{ openwrt_wireguard_apply_site.hub_host }}' ] &&
+         [ "$public_key" != "$hub_public_key" ] &&
+         [ "$endpoint" != "$endpoint_host" ]; then
+        continue
+      fi
+      uci -q delete "$section" || true
+    done
+fi
+
+{% if endpoint_route_managed %}
+delete_route_target "$endpoint_host"
+{% endif %}
+{% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
+delete_route_target "{{ allowed_ip }}"
+{% endfor %}
+{% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
+{% for peer in openwrt_wireguard_site_members if peer.host != openwrt_wireguard_apply_site.hub_host and (peer.active | default(true)) and peer.lan_cidr is defined %}
+delete_route_target "{{ peer.lan_cidr }}"
+{% endfor %}
+{% endif %}
+
+uci set "network.${interface_name}=interface"
+uci set "network.${interface_name}.proto=wireguard"
+uci set "network.${interface_name}.private_key=${spoke_private_key}"
+{% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
+uci set "network.${interface_name}.listen_port={{ openwrt_wireguard_apply_site.listen_port }}"
+{% else %}
+uci -q delete "network.${interface_name}.listen_port" || true
+{% endif %}
+uci -q delete "network.${interface_name}.addresses" || true
+uci add_list "network.${interface_name}.addresses=${spoke_address}"
+
+{% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
+while IFS='|' read -r peer_host peer_public_key peer_allowed_ips; do
+  [ -n "$peer_host" ] || continue
+  peer_section="$(find_wireguard_peer_section "$peer_host" "$peer_public_key" | head -n 1)"
+  if [ -z "$peer_section" ]; then
+    peer_section="$(uci add network "wireguard_${interface_name}")"
+  fi
+  delete_duplicate_wireguard_peer_sections "$peer_section" "$peer_host" "$peer_public_key"
+  uci set "network.${peer_section}.description=${peer_host}"
+  uci set "network.${peer_section}.public_key=${peer_public_key}"
+  uci set "network.${peer_section}.route_allowed_ips=1"
+  uci -q delete "network.${peer_section}.allowed_ips" || true
+  for allowed_ip in $peer_allowed_ips; do
+    uci add_list "network.${peer_section}.allowed_ips=${allowed_ip}"
+  done
+done <<'__ANSIBLE_WIREGUARD_PEERS__'
+{% for peer in openwrt_wireguard_site_members if peer.host != openwrt_wireguard_apply_site.hub_host and (peer.active | default(true)) %}
+{% set peer_allowed_ips = peer.allowed_ips | default([peer.address] + ([peer.lan_cidr] if peer.lan_cidr is defined else [])) %}
+{{ peer.host }}|{{ peer.public_key }}|{{ peer_allowed_ips | join(' ') }}
+{% endfor %}
+__ANSIBLE_WIREGUARD_PEERS__
+{% else %}
+peer_section="$(uci add network "wireguard_${interface_name}")"
+uci set "network.${peer_section}.description={{ openwrt_wireguard_apply_site.hub_host }}"
+uci set "network.${peer_section}.public_key=${hub_public_key}"
+uci set "network.${peer_section}.endpoint_host=${endpoint_host}"
+uci set "network.${peer_section}.endpoint_port=${endpoint_port}"
+uci set "network.${peer_section}.persistent_keepalive=25"
+uci set "network.${peer_section}.route_allowed_ips=0"
+{% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
+uci add_list "network.${peer_section}.allowed_ips={{ allowed_ip }}"
+{% endfor %}
+
+{% if endpoint_route_managed %}
+uci set "network.${endpoint_route_section}=route"
+uci set "network.${endpoint_route_section}.interface=$endpoint_route_interface"
+uci set "network.${endpoint_route_section}.target=$endpoint_host"
+uci set "network.${endpoint_route_section}.netmask=255.255.255.255"
+uci -q delete "network.${endpoint_route_section}.disabled" || true
+{% endif %}
+
+{% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
+uci set "network.${site_id}_wg_hub_route_{{ loop.index }}=route"
+uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.interface=${interface_name}"
+uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.target={{ allowed_ip | regex_replace('/32$', '') }}"
+{% if allowed_ip is search('/32$') %}
+uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.netmask=255.255.255.255"
+{% elif allowed_ip is search('/24$') %}
+uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.netmask=255.255.255.0"
+{% elif allowed_ip is search('/23$') %}
+uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.netmask=255.255.254.0"
+{% else %}
+echo "Unsupported route prefix in {{ allowed_ip }}" >&2
+exit 1
+{% endif %}
+{% endfor %}
+{% endif %}
+
+uci commit network
+
+delete_named_section firewall "wg_${site_id}"
+delete_named_section firewall "lan_to_wg_${site_id}"
+delete_named_section firewall "wg_${site_id}_to_lan"
+delete_named_section firewall "wg_${site_id}_to_lan_masq"
+delete_named_section firewall "allow_wg_${site_id}_wan"
+
+uci set "firewall.wg_${site_id}=zone"
+uci set "firewall.wg_${site_id}.name=$interface_name"
+uci add_list "firewall.wg_${site_id}.network=$interface_name"
+uci set "firewall.wg_${site_id}.input=ACCEPT"
+uci set "firewall.wg_${site_id}.output=ACCEPT"
+uci set "firewall.wg_${site_id}.forward=ACCEPT"
+uci set "firewall.wg_${site_id}.masq=1"
+uci set "firewall.wg_${site_id}.mtu_fix=1"
+
+uci set "firewall.lan_to_wg_${site_id}=forwarding"
+uci set "firewall.lan_to_wg_${site_id}.src=lan"
+uci set "firewall.lan_to_wg_${site_id}.dest=$interface_name"
+
+uci set "firewall.wg_${site_id}_to_lan=forwarding"
+uci set "firewall.wg_${site_id}_to_lan.src=$interface_name"
+uci set "firewall.wg_${site_id}_to_lan.dest=lan"
+
+{% if openwrt_wireguard_apply_member.lan_cidr is defined %}
+uci set "firewall.wg_${site_id}_to_lan_masq=nat"
+uci set "firewall.wg_${site_id}_to_lan_masq.name=${interface_name}-to-lan-masquerade"
+uci set "firewall.wg_${site_id}_to_lan_masq.family=ipv4"
+uci set "firewall.wg_${site_id}_to_lan_masq.src=lan"
+uci set "firewall.wg_${site_id}_to_lan_masq.src_ip=$wireguard_network_cidr"
+uci set "firewall.wg_${site_id}_to_lan_masq.target=MASQUERADE"
+{% endif %}
+
+{% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
+uci set "firewall.allow_wg_${site_id}_wan=rule"
+uci set "firewall.allow_wg_${site_id}_wan.name=Allow-${interface_name}-WAN"
+uci set "firewall.allow_wg_${site_id}_wan.src=wan"
+uci set "firewall.allow_wg_${site_id}_wan.dest_port={{ openwrt_wireguard_apply_site.listen_port }}"
+uci set "firewall.allow_wg_${site_id}_wan.proto=udp"
+uci set "firewall.allow_wg_${site_id}_wan.target=ACCEPT"
+{% endif %}
+
+uci commit firewall
+
+after_network="$(checksum_file /etc/config/network)"
+after_firewall="$(checksum_file /etc/config/firewall)"
+
+if [ "$before_network" != "$after_network" ]; then
+  network_changed=true
+fi
+
+if [ "$before_firewall" != "$after_firewall" ]; then
+  firewall_changed=true
+fi
+
+if [ "$network_changed" = true ] || [ "$firewall_changed" = true ]; then
+  echo changed=true
+else
+  echo changed=false
+fi
+echo network_changed=$network_changed
+echo firewall_changed=$firewall_changed

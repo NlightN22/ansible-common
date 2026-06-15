@@ -1,0 +1,20 @@
+---
+- name: Arm OpenWrt rollback guard
+  ansible.builtin.raw: |
+    mkdir -p {{ openwrt_rollback_runtime_dir }} {{ openwrt_rollback_backup_dir }} "$(dirname {{ openwrt_rollback_log_path }})"
+    if [ -s {{ openwrt_rollback_pid_path }} ] && kill -0 "$(cat {{ openwrt_rollback_pid_path }})" 2>/dev/null; then
+      old_pid="$(cat {{ openwrt_rollback_pid_path }})"
+      if [ -f {{ openwrt_rollback_marker_path }} ]; then
+        printf '%s rollback guard already running pid=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)" "$old_pid" >> {{ openwrt_rollback_log_path }}
+        exit 0
+      fi
+      kill "$old_pid" 2>/dev/null || true
+      printf '%s stopped disarmed rollback guard pid=%s before rearm\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)" "$old_pid" >> {{ openwrt_rollback_log_path }}
+    fi
+    rm -f {{ openwrt_rollback_pid_path }}
+    touch {{ openwrt_rollback_marker_path }}
+    nohup {{ openwrt_rollback_script }} >/dev/null 2>&1 &
+    guard_pid="$!"
+    echo "$guard_pid" > {{ openwrt_rollback_pid_path }}
+    printf '%s rollback armed pid=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)" "$guard_pid" >> {{ openwrt_rollback_log_path }}
+  changed_when: true

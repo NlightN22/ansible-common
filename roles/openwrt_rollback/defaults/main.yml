@@ -1,0 +1,11 @@
+---
+openwrt_rollback_soft_delay_seconds: 120
+openwrt_rollback_hard_delay_seconds: 300
+openwrt_rollback_runtime_dir: /tmp/ansible-rollback
+openwrt_rollback_persistent_dir: /etc/ansible-rollback
+openwrt_rollback_backup_dir: "{{ openwrt_rollback_persistent_dir }}/backups"
+openwrt_rollback_log_path: "{{ openwrt_rollback_persistent_dir }}/rollback.log"
+openwrt_rollback_script: "{{ openwrt_rollback_runtime_dir }}/run-rollback.sh"
+openwrt_rollback_marker_path: "{{ openwrt_rollback_runtime_dir }}/armed"
+openwrt_rollback_pid_path: "{{ openwrt_rollback_runtime_dir }}/guard.pid"
+openwrt_rollback_paths: []

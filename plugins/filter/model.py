@@ -251,6 +251,8 @@ def architecture_wireguard_view(
     view["endpoint"] = view.get("endpoint", source.get("endpoint", {}))
     view["network_cidr"] = view.get("network_cidr", source.get("network_cidr"))
     view["preferred_transport"] = view.get("preferred_transport", source.get("preferred_transport", {}))
+    view["hub_host"] = view.get("hub_host", view.get("hub"))
+    view["hub_public_key"] = view.get("hub_public_key", hub_member.get("public_key"))
     if node_id:
         member = architecture_network_member(view, node_id)
         view["current_member"] = member

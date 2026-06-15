@@ -1,0 +1,13 @@
+---
+- name: Cancel OpenWrt rollback guard
+  ansible.builtin.raw: |
+    rm -f {{ openwrt_rollback_marker_path }}
+    mkdir -p "$(dirname {{ openwrt_rollback_log_path }})"
+    printf '%s rollback disarmed by Ansible\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)" >> {{ openwrt_rollback_log_path }}
+    if [ -s {{ openwrt_rollback_pid_path }} ] && kill -0 "$(cat {{ openwrt_rollback_pid_path }})" 2>/dev/null; then
+      guard_pid="$(cat {{ openwrt_rollback_pid_path }})"
+      kill "$guard_pid" 2>/dev/null || true
+      printf '%s rollback guard stopped pid=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date)" "$guard_pid" >> {{ openwrt_rollback_log_path }}
+    fi
+    rm -f {{ openwrt_rollback_pid_path }}
+  changed_when: true
