@@ -1,0 +1,2 @@
+---
+wireguard_openwrt_discovery_require_openwrt_group: true

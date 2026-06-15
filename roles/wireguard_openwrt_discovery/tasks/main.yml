@@ -1,0 +1,52 @@
+---
+- name: Validate selected WireGuard OpenWrt discovery network
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network is defined
+      - resolved_wireguard_network is mapping
+      - resolved_wireguard_network.current_member is mapping
+      - not (wireguard_openwrt_discovery_require_openwrt_group | bool) or 'openwrt' in group_names
+    fail_msg: >-
+      Host {{ inventory_hostname }} is not an OpenWrt member of
+      WireGuard network {{ network_id | default(resolved_wireguard_network.id | default('unknown')) }}.
+
+- name: Collect OpenWrt WireGuard and routing state
+  ansible.builtin.raw: |
+    set +e
+    echo '### host'
+    if command -v hostname >/dev/null 2>&1; then
+      hostname
+    else
+      cat /proc/sys/kernel/hostname
+    fi
+    echo '### release'
+    cat /etc/openwrt_release
+    echo '### wg command'
+    command -v wg
+    echo '### xp2p command'
+    command -v xp2p
+    echo '### xp2pc interface'
+    ip link show xp2pc
+    echo '### network uci'
+    uci show network |
+      sed -E "s/(private_key=)'[^']*'/\1'***'/g; s/(password=)'?[^' ]+'?/\1'***'/g; s/(username=)'?[^' ]+'?/\1'***'/g"
+    echo '### firewall uci'
+    uci show firewall |
+      sed -E "s/(password=)'?[^' ]+'?/\1'***'/g; s/(username=)'?[^' ]+'?/\1'***'/g"
+    echo '### wg show'
+    wg show
+    echo '### wg public keys'
+    for iface in $(wg show interfaces 2>/dev/null); do
+      printf '%s ' "$iface"
+      wg show "$iface" public-key
+    done
+    echo '### routes'
+    ip route show table all
+    echo '### rules'
+    ip rule show
+  register: wireguard_openwrt_discovery
+  changed_when: false
+
+- name: Show OpenWrt discovery
+  ansible.builtin.debug:
+    var: wireguard_openwrt_discovery.stdout_lines

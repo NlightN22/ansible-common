@@ -13,6 +13,7 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `roles/model_normalize`: normalization entry point that publishes `resolved_architecture`.
 - `roles/openwrt_rollback`: reusable OpenWrt rollback guard for risky network changes.
 - `roles/wireguard_openwrt_apply`: WireGuard OpenWrt package install, UCI apply, restart, and verification.
+- `roles/wireguard_openwrt_discovery`: read-only WireGuard OpenWrt runtime and routing discovery.
 - `roles/wireguard_openwrt_healthcheck`: read-only WireGuard OpenWrt runtime, route, UCI, and firewall checks.
 - `plugins/filter/model.py`: filters for model loading, validation, normalization, and access helpers.
 - `docs/model_contract.md`: version 1 architecture model contract.
@@ -23,6 +24,7 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `playbooks/diagnostics.yml`: reusable model diagnostics playbook.
 - `playbooks/render_network_configs.yml`: reusable normalized network rendering playbook.
 - `playbooks/wireguard_openwrt_apply.yml`: reusable WireGuard OpenWrt apply playbook.
+- `playbooks/wireguard_openwrt_discovery.yml`: reusable WireGuard OpenWrt discovery playbook.
 - `playbooks/wireguard_openwrt_healthcheck.yml`: reusable WireGuard OpenWrt healthcheck playbook.
 
 ## Consumer Project Usage

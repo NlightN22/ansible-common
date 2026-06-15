@@ -55,6 +55,18 @@ Consumer projects select the model file, network id, and host scope, then import
 
 The common playbook loads and normalizes the model, publishes `resolved_wireguard_network`, and runs the read-only OpenWrt checks. Inventory, vault files, real endpoints, and concrete group names remain in the consuming project.
 
+The same wrapper shape applies to read-only discovery:
+
+```yaml
+---
+- import_playbook: ansible_common.core.wireguard_openwrt_discovery
+  vars:
+    architecture_model_files:
+      - "{{ inventory_env_dir }}/models/wireguard/main.yml"
+    network_id: wg_main
+    target_group: "{{ management_resolver_runtime_group }}_openwrt:&wireguard_wg_main"
+```
+
 ## WireGuard OpenWrt Apply Wrapper
 
 Apply wrappers should keep vault files, concrete model paths, scope selection, and confirmation flags in the consumer project.
