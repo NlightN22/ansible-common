@@ -1,0 +1,2 @@
+---
+common_packages: "{{ linux_baseline_packages | default(default_packages | default([])) }}"

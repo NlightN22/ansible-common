@@ -1,0 +1,27 @@
+---
+- name: Validate architecture model root object
+  ansible.builtin.assert:
+    that:
+      - architecture_model is defined
+      - architecture_model is mapping
+    fail_msg: "architecture_model must be defined as a mapping."
+
+- name: Validate architecture model version
+  ansible.builtin.assert:
+    that:
+      - architecture_model.version is defined
+      - architecture_model.version is integer
+      - architecture_model.version in architecture_model_supported_versions
+    fail_msg: "architecture_model.version must be one of {{ architecture_model_supported_versions | join(', ') }}."
+
+- name: Validate optional architecture model sections
+  ansible.builtin.assert:
+    that:
+      - architecture_model.nodes | default({}) is mapping
+      - architecture_model.sites | default({}) is mapping
+      - architecture_model.networks | default({}) is mapping
+      - architecture_model.transports | default({}) is mapping
+      - architecture_model.domain_controllers | default({}) is mapping
+      - architecture_model.metadata | default({}) is mapping
+      - architecture_model.extensions | default({}) is mapping
+    fail_msg: "Optional architecture_model sections must be mappings when present."

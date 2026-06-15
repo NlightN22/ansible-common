@@ -1,0 +1,19 @@
+# Python and Ansible cache
+__pycache__/
+*.pyc
+*.retry
+
+# Local test output
+.cache/
+.tmp/
+
+# Installed dependencies
+collections/ansible_collections/
+
+# Secrets must not be committed to this collection
+.vault-pass
+*.key
+*.pem
+*.p12
+*.pfx
+vault/

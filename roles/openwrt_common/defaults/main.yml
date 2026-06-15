@@ -1,0 +1,10 @@
+---
+openwrt_packages: []
+openwrt_base_packages: "{{ ((default_packages | default([])) + (openwrt_packages | default([]))) | unique }}"
+openwrt_required_commands: []
+openwrt_managed_scripts_dir: /usr/local/sbin
+openwrt_healthcheck_script_name: ansible-healthcheck
+openwrt_healthcheck_urls: []
+openwrt_timezone_name: ""
+openwrt_posix_timezone: ""
+openwrt_root_shell: /bin/bash

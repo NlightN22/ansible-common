@@ -1,0 +1,138 @@
+---
+- name: Read current OpenWrt hostname
+  ansible.builtin.raw: uci -q get system.@system[0].hostname || cat /proc/sys/kernel/hostname
+  register: openwrt_current_hostname
+  changed_when: false
+
+- name: Read current OpenWrt timezone
+  ansible.builtin.raw: |
+    printf 'zonename='
+    uci -q get system.@system[0].zonename || true
+    printf 'timezone='
+    uci -q get system.@system[0].timezone || true
+  register: openwrt_current_timezone
+  changed_when: false
+
+- name: Configure OpenWrt hostname
+  ansible.builtin.raw: |
+    uci set system.@system[0].hostname='{{ inventory_hostname }}'
+    uci commit system
+    /etc/init.d/system reload || true
+  when:
+    - openwrt_current_hostname.stdout | trim != inventory_hostname
+  changed_when: true
+
+- name: Configure OpenWrt timezone
+  ansible.builtin.raw: |
+    uci set system.@system[0].zonename='{{ openwrt_timezone_name }}'
+    uci set system.@system[0].timezone='{{ openwrt_posix_timezone }}'
+    uci commit system
+    /etc/init.d/system reload || true
+  when:
+    - openwrt_timezone_name | length > 0
+    - openwrt_posix_timezone | length > 0
+    - >-
+      ('zonename=' ~ openwrt_timezone_name) not in openwrt_current_timezone.stdout
+      or ('timezone=' ~ openwrt_posix_timezone) not in openwrt_current_timezone.stdout
+  changed_when: true
+
+- name: Update OpenWrt package index
+  ansible.builtin.raw: opkg update
+  changed_when: false
+
+- name: Install OpenWrt base packages
+  ansible.builtin.raw: |
+    missing=""
+    for package in {{ openwrt_base_packages | join(' ') }}; do
+      if ! opkg list-installed "$package" | grep -q "^$package - "; then
+        missing="$missing $package"
+      fi
+    done
+    if [ -n "$missing" ]; then
+      opkg install $missing
+    fi
+  when: openwrt_base_packages | length > 0
+  register: openwrt_install_packages
+  changed_when: openwrt_install_packages.stdout | trim | length > 0
+
+- name: Check required OpenWrt commands
+  ansible.builtin.raw: |
+    missing=""
+    for command_name in {{ openwrt_required_commands | join(' ') }}; do
+      if ! command -v "$command_name" >/dev/null 2>&1; then
+        missing="$missing $command_name"
+      fi
+    done
+    if [ -n "$missing" ]; then
+      echo "Missing required commands:$missing" >&2
+      exit 1
+    fi
+  when: openwrt_required_commands | length > 0
+  changed_when: false
+
+- name: Read current OpenWrt root shell
+  ansible.builtin.raw: "awk -F: '$1 == \"root\" { print $7 }' /etc/passwd"
+  register: openwrt_current_root_shell
+  changed_when: false
+
+- name: Ensure OpenWrt root shell is listed
+  ansible.builtin.raw: |
+    shells_file="/etc/shells"
+    touch "$shells_file"
+    if grep -qx '{{ openwrt_root_shell }}' "$shells_file"; then
+      echo unchanged
+    else
+      printf '%s\n' '{{ openwrt_root_shell }}' >> "$shells_file"
+      echo changed
+    fi
+  register: openwrt_shells_update
+  changed_when: openwrt_shells_update.stdout | trim == 'changed'
+
+- name: Configure OpenWrt root shell
+  ansible.builtin.raw: |
+    tmp_passwd="$(mktemp)"
+    awk -F: 'BEGIN { OFS = ":" } $1 == "root" { $7 = "{{ openwrt_root_shell }}" } { print }' /etc/passwd > "$tmp_passwd"
+    cat "$tmp_passwd" > /etc/passwd
+    rm -f "$tmp_passwd"
+  when: openwrt_current_root_shell.stdout | trim != openwrt_root_shell
+  changed_when: true
+
+- name: Ensure managed scripts directory exists
+  ansible.builtin.raw: "mkdir -p {{ openwrt_managed_scripts_dir }}"
+  changed_when: false
+
+- name: Deploy OpenWrt healthcheck script
+  ansible.builtin.raw: |
+    tmp_script="$(mktemp)"
+    target_script="{{ openwrt_managed_scripts_dir }}/{{ openwrt_healthcheck_script_name }}"
+    cat > "$tmp_script" <<'EOF'
+    #!/bin/sh
+    set -eu
+
+    echo "hostname=$(cat /proc/sys/kernel/hostname)"
+    echo "kernel=$(/bin/uname -r)"
+    echo "uptime=$(cut -d. -f1 /proc/uptime)"
+
+    {% if openwrt_healthcheck_urls | length > 0 %}
+    if command -v wget >/dev/null 2>&1; then
+      {% for url in openwrt_healthcheck_urls %}
+      wget -q --spider '{{ url }}' && echo "url_ok={{ url }}" || echo "url_fail={{ url }}"
+      {% endfor %}
+    fi
+    {% endif %}
+    EOF
+    if [ -f "$target_script" ] && cmp -s "$tmp_script" "$target_script"; then
+      rm -f "$tmp_script"
+      echo unchanged
+    else
+      mv "$tmp_script" "$target_script"
+      chmod 0755 "$target_script"
+      echo changed
+    fi
+  register: openwrt_deploy_healthcheck
+  changed_when: openwrt_deploy_healthcheck.stdout | trim == 'changed'
+
+- name: Run OpenWrt healthcheck script
+  ansible.builtin.raw: "{{ openwrt_managed_scripts_dir }}/{{ openwrt_healthcheck_script_name }}"
+  register: openwrt_healthcheck
+  changed_when: false

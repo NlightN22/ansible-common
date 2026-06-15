@@ -1,0 +1,7 @@
+---
+architecture_model:
+  version: 1
+  nodes: {}
+  sites: {}
+  networks: {}
+  transports: {}

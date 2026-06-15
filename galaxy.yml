@@ -1,0 +1,17 @@
+---
+namespace: ansible_common
+name: core
+version: 0.1.0
+readme: README.md
+authors:
+  - Infrastructure Automation Maintainers
+description: Reusable Ansible roles and model utilities for environment-neutral infrastructure automation.
+license:
+  - MIT
+tags:
+  - infrastructure
+  - automation
+  - models
+  - linux
+  - openwrt
+dependencies: {}

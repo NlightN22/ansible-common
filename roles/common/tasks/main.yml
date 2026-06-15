@@ -1,0 +1,16 @@
+---
+- name: Install common packages on Debian family hosts
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+  when:
+    - ansible_facts.os_family | default('') == 'Debian'
+    - common_packages | length > 0
+
+- name: Set timezone on Linux hosts
+  community.general.timezone:
+    name: "{{ timezone }}"
+  when:
+    - timezone is defined
+    - ansible_facts.system | default('') == 'Linux'

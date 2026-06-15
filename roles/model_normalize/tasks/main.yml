@@ -1,0 +1,8 @@
+---
+- name: Validate architecture model before normalization
+  ansible.builtin.include_role:
+    name: ansible_common.core.model_validate
+
+- name: Publish normalized architecture model
+  ansible.builtin.set_fact:
+    "{{ architecture_model_normalized_var }}": "{{ architecture_model }}"
