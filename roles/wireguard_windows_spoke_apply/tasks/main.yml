@@ -1,0 +1,83 @@
+---
+- name: Select Windows WireGuard spoke compatibility model
+  ansible.builtin.set_fact:
+    wireguard_site: >-
+      {{
+        resolved_wireguard_network
+        | combine({
+            'hub': resolved_wireguard_network.hub_member,
+            'spokes': (
+              resolved_wireguard_network.active_peers
+              | dict2items
+              | map(attribute='value')
+              | list
+            )
+          })
+      }}
+    wireguard_windows_member: "{{ resolved_wireguard_network.current_member }}"
+    wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.interface_name }}"
+    wireguard_windows_staged_config: "{{ wireguard_windows_staging_dir }}\\{{ resolved_wireguard_network.interface_name }}.conf"
+
+- name: Validate Windows WireGuard spoke model
+  ansible.builtin.assert:
+    that:
+      - wireguard_windows_member.role | default('spoke') == 'spoke'
+      - wireguard_windows_member.private_key is defined
+      - wireguard_windows_member.private_key is not search('CHANGE_ME')
+      - wireguard_windows_member.address is defined
+      - resolved_wireguard_network.hub_public_key is defined
+      - resolved_wireguard_network.hub_public_key is not search('CHANGE_ME')
+      - resolved_wireguard_network.endpoint.host is defined
+      - resolved_wireguard_network.endpoint.port is defined
+      - resolved_wireguard_network.hub_allowed_ips | length > 0
+    fail_msg: "Windows WireGuard spoke model is incomplete for {{ inventory_hostname }}."
+
+- name: Ensure Windows WireGuard staging directory exists
+  ansible.windows.win_file:
+    path: "{{ wireguard_windows_staging_dir }}"
+    state: directory
+
+- name: Stage Windows WireGuard spoke config
+  ansible.windows.win_template:
+    src: windows-spoke.conf.j2
+    dest: "{{ wireguard_windows_staged_config }}"
+  no_log: true
+
+- name: Recreate this Windows WireGuard spoke tunnel service
+  become: true
+  become_method: runas
+  become_user: System
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $tunnelName = '{{ wireguard_windows_tunnel_name }}'
+    $serviceName = "WireGuardTunnel`$$tunnelName"
+    $configPath = '{{ wireguard_windows_staged_config }}'
+    $wireGuard = (Get-Command wireguard.exe -ErrorAction Stop).Source
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($service) {
+      if ($service.Status -ne 'Stopped') {
+        Stop-Service -Name $service.Name -Force -ErrorAction Stop
+      }
+      & $wireGuard /uninstalltunnelservice $tunnelName | Out-String
+    }
+    & $wireGuard /installtunnelservice $configPath | Out-String
+    Start-Service -Name $serviceName -ErrorAction Stop
+    Get-Service -Name $serviceName |
+      Select-Object Name, Status, StartType |
+      ConvertTo-Json -Compress
+  register: windows_wireguard_spoke_apply
+  changed_when: true
+
+- name: Check Windows WireGuard spoke runtime state
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $wg = (Get-Command wg.exe -ErrorAction Stop).Source
+    & $wg show {{ wireguard_windows_tunnel_name }}
+  register: windows_wireguard_spoke_runtime
+  changed_when: false
+
+- name: Validate Windows WireGuard spoke runtime
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network.hub_public_key in windows_wireguard_spoke_runtime.stdout
+    fail_msg: "Windows WireGuard spoke runtime validation failed on {{ inventory_hostname }}."

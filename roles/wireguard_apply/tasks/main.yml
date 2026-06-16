@@ -26,6 +26,20 @@
     name: ansible_common.core.wireguard_mikrotik_apply
   when: wireguard_member_platform == 'mikrotik'
 
+- name: Run Windows WireGuard hub apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_windows_hub_apply
+  when:
+    - wireguard_member_platform == 'windows'
+    - resolved_wireguard_network.current_member.role | default('spoke') == 'hub'
+
+- name: Run Windows WireGuard spoke apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_windows_spoke_apply
+  when:
+    - wireguard_member_platform == 'windows'
+    - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
+
 - name: Handle unsupported WireGuard apply platform
   ansible.builtin.fail:
     msg: >-

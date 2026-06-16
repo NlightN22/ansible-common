@@ -1,0 +1,58 @@
+---
+- name: Check Chocolatey and WireGuard installation
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Continue'
+    $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
+    $wg = Get-Command wg.exe -ErrorAction SilentlyContinue
+    $wireGuard = Get-Command wireguard.exe -ErrorAction SilentlyContinue
+    [PSCustomObject]@{
+      ChocolateyPath = if ($choco) { $choco.Source } else { $null }
+      ChocolateyVersion = if ($choco) { (& $choco.Source --version) } else { $null }
+      WgPath = if ($wg) { $wg.Source } else { $null }
+      WireGuardPath = if ($wireGuard) { $wireGuard.Source } else { $null }
+    } | ConvertTo-Json -Compress
+  register: windows_wireguard_installation
+  changed_when: false
+
+- name: Check WireGuard tunnel services
+  ansible.windows.win_shell: |
+    Get-Service -Name 'WireGuardTunnel$*' -ErrorAction SilentlyContinue |
+      Select-Object Name, Status, StartType |
+      ConvertTo-Json -Compress
+  register: windows_wireguard_services
+  changed_when: false
+
+- name: Check WireGuard config directory
+  ansible.windows.win_shell: |
+    $configRoot = '{{ resolved_wireguard_network.windows_config_dir }}'
+    if (-not (Test-Path -LiteralPath $configRoot)) {
+      [PSCustomObject]@{
+        ConfigRoot = $configRoot
+        Exists = $false
+        Configs = @()
+      } | ConvertTo-Json -Compress
+      exit 0
+    }
+    $configs = Get-ChildItem -LiteralPath $configRoot -File |
+      Select-Object Name, FullName, LastWriteTime
+    [PSCustomObject]@{
+      ConfigRoot = $configRoot
+      Exists = $true
+      Configs = @($configs)
+    } | ConvertTo-Json -Compress
+  register: windows_wireguard_configs
+  changed_when: false
+  when: resolved_wireguard_network.windows_config_dir is defined
+
+- name: Show Windows WireGuard installation
+  ansible.builtin.debug:
+    var: windows_wireguard_installation.stdout
+
+- name: Show Windows WireGuard services
+  ansible.builtin.debug:
+    var: windows_wireguard_services.stdout
+
+- name: Show Windows WireGuard configs
+  ansible.builtin.debug:
+    var: windows_wireguard_configs.stdout
+  when: resolved_wireguard_network.windows_config_dir is defined

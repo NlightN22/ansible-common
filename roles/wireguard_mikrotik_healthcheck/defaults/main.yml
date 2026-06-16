@@ -1,7 +1,7 @@
 ---
 mikrotik_wireguard_enabled: true
 mikrotik_wireguard_site_id: "{{ wireguard_site_id | default('') }}"
-mikrotik_wireguard_managed_comment_prefix: "infra-ansible:wireguard"
+mikrotik_wireguard_managed_comment_prefix: "ansible-common:wireguard"
 mikrotik_wireguard_persistent_keepalive: 25
 mikrotik_wireguard_safe_mode_enabled: false
 mikrotik_wireguard_safe_mode_required: false

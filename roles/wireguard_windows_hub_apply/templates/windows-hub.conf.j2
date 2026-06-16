@@ -1,0 +1,25 @@
+# Managed by Ansible. Source: {{ template_path | default('templates/wireguard/windows-hub.conf.j2') }}
+# Network: {{ network_display_name | default(wireguard_site_id) }}
+
+[Interface]
+PrivateKey = {{ wireguard_hub_private_key }}
+Address = {{ wireguard_site.hub_address }}
+ListenPort = {{ wireguard_site.listen_port }}
+{% for command in wireguard_site.post_up | default([]) %}
+PostUp = {{ command }}
+{% endfor %}
+
+{% for spoke in wireguard_site.spokes | default([]) %}
+[Peer]
+# {{ spoke.name | default(spoke.host) }}
+PublicKey = {{ spoke.public_key }}
+{% set spoke_hostvars = hostvars[spoke.host] | default({}) %}
+{% set spoke_site_lans = spoke.site_lan_cidrs | default(spoke_hostvars.site_lan_cidrs | default([])) %}
+{% if spoke_site_lans is string %}
+{% set spoke_site_lans = [spoke_site_lans] %}
+{% endif %}
+{% set spoke_site_lan = spoke.site_lan_cidr | default(spoke_hostvars.site_lan_cidr | default('')) %}
+{% set spoke_allowed_ips = spoke.allowed_ips | default([spoke.address] + spoke_site_lans + ([spoke_site_lan] if spoke_site_lan else [])) %}
+AllowedIPs = {{ spoke_allowed_ips | join(', ') }}
+
+{% endfor %}

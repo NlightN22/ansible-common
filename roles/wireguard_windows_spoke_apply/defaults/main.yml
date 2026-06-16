@@ -1,0 +1,2 @@
+---
+wireguard_windows_staging_dir: C:\ProgramData\ansible-common\wireguard-staging

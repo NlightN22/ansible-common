@@ -1,0 +1,33 @@
+---
+- name: Validate Windows WireGuard backup model
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network.windows_backup_dir is defined
+      - resolved_wireguard_network.windows_config_dir is defined
+    fail_msg: "Windows WireGuard backup requires windows_backup_dir and windows_config_dir."
+
+- name: Save local WireGuard configuration backup
+  become: true
+  become_method: runas
+  become_user: System
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $backupRoot = '{{ resolved_wireguard_network.windows_backup_dir }}'
+    $configRoot = '{{ resolved_wireguard_network.windows_config_dir }}'
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backupPath = Join-Path $backupRoot $stamp
+    New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+    if (Test-Path -LiteralPath $configRoot) {
+      Copy-Item -LiteralPath $configRoot -Destination $backupPath -Recurse -Force
+    }
+    [PSCustomObject]@{
+      BackupPath = $backupPath
+      ConfigRoot = $configRoot
+      Exists = Test-Path -LiteralPath $configRoot
+    } | ConvertTo-Json -Compress
+  register: windows_wireguard_backup
+  changed_when: true
+
+- name: Show local WireGuard backup path
+  ansible.builtin.debug:
+    var: windows_wireguard_backup.stdout
