@@ -16,6 +16,16 @@
     wireguard_openwrt_apply_confirm: "{{ wireguard_apply_confirm }}"
   when: wireguard_member_platform == 'openwrt'
 
+- name: Run Linux WireGuard apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_linux_apply
+  when: wireguard_member_platform == 'linux'
+
+- name: Run MikroTik WireGuard apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_mikrotik_apply
+  when: wireguard_member_platform == 'mikrotik'
+
 - name: Handle unsupported WireGuard apply platform
   ansible.builtin.fail:
     msg: >-

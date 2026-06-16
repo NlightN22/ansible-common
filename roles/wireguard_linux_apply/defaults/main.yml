@@ -1,0 +1,5 @@
+---
+linux_wireguard_packages:
+  - wireguard-tools
+linux_wireguard_config_dir: /etc/wireguard
+linux_wireguard_hide_config_log: true

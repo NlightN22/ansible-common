@@ -1,0 +1,23 @@
+# Managed by Ansible. Source: roles/linux_wireguard/templates/linux-wireguard-hub.conf.j2
+
+[Interface]
+PrivateKey = {{ linux_wireguard_member.private_key }}
+Address = {{ linux_wireguard_member.address }}
+ListenPort = {{ linux_wireguard_site.listen_port }}
+Table = off
+{% for peer in linux_wireguard_site_members if peer.host != linux_wireguard_site.hub_host and (peer.active | default(true)) %}
+{% set peer_allowed_ips = ([peer.address] + ([peer.lan_cidr] if peer.lan_cidr is defined else []) + (peer.allowed_ips | default([])) + (peer.extra_allowed_ips | default([]))) | unique %}
+{% for allowed_ip in peer_allowed_ips %}
+PostUp = ip route replace {{ allowed_ip }} dev %i
+PostDown = ip route show {{ allowed_ip }} dev %i | grep -q . && ip route delete {{ allowed_ip }} dev %i || true
+{% endfor %}
+{% endfor %}
+
+{% for peer in linux_wireguard_site_members if peer.host != linux_wireguard_site.hub_host and (peer.active | default(true)) %}
+[Peer]
+# {{ peer.name | default(peer.host) }}
+PublicKey = {{ peer.public_key }}
+{% set peer_allowed_ips = ([peer.address] + ([peer.lan_cidr] if peer.lan_cidr is defined else []) + (peer.allowed_ips | default([])) + (peer.extra_allowed_ips | default([]))) | unique %}
+AllowedIPs = {{ peer_allowed_ips | join(', ') }}
+
+{% endfor %}

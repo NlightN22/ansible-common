@@ -8,6 +8,18 @@
     name: ansible_common.core.wireguard_openwrt_healthcheck
   when: wireguard_member_platform == 'openwrt'
 
+- name: Run Linux WireGuard healthcheck
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_linux_healthcheck
+  when: wireguard_member_platform == 'linux'
+
+- name: Run MikroTik WireGuard healthcheck
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_mikrotik_healthcheck
+  vars:
+    mikrotik_wireguard_verify_reachability_enabled: "{{ wireguard_mikrotik_verify_reachability_enabled | default(true) }}"
+  when: wireguard_member_platform == 'mikrotik'
+
 - name: Handle unsupported WireGuard healthcheck platform
   ansible.builtin.fail:
     msg: >-

@@ -1,0 +1,99 @@
+---
+- name: Select resolved Linux WireGuard model
+  ansible.builtin.set_fact:
+    wireguard_site: "{{ resolved_wireguard_network }}"
+    linux_wireguard_resolved_site_members: >-
+      {{
+        [resolved_wireguard_network.hub_member]
+        + (
+          resolved_wireguard_network.active_peers
+          | dict2items
+          | map(attribute='value')
+          | list
+        )
+      }}
+
+- name: Select Linux WireGuard model
+  ansible.builtin.set_fact:
+    linux_wireguard_site: "{{ wireguard_site }}"
+    linux_wireguard_site_members: >-
+      "{{ linux_wireguard_resolved_site_members }}"
+
+- name: Select Linux WireGuard member model
+  ansible.builtin.set_fact:
+    linux_wireguard_member: >-
+      {{
+        (
+          linux_wireguard_site_members
+          | selectattr('host', 'equalto', inventory_hostname)
+          | list
+        )
+        | first
+      }}
+
+- name: Validate Linux WireGuard hub model
+  ansible.builtin.assert:
+    that:
+      - linux_wireguard_member is mapping
+      - linux_wireguard_member.role | default('spoke') == 'hub'
+      - linux_wireguard_member.private_key is defined
+      - linux_wireguard_member.private_key is not search('CHANGE_ME')
+      - linux_wireguard_member.address is defined
+      - linux_wireguard_site.listen_port | int > 0
+      - linux_wireguard_site.interface_name | length > 0
+      - linux_wireguard_site.spokes | default([]) | length > 0
+    fail_msg: "Linux WireGuard hub model is incomplete for {{ inventory_hostname }}."
+
+- name: Gather Linux package facts when needed
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+
+- name: Install Linux WireGuard packages
+  ansible.builtin.apt:
+    name: "{{ linux_wireguard_packages }}"
+    state: present
+    update_cache: true
+  become: true
+  when: ansible_os_family | default('') == 'Debian'
+
+- name: Ensure Linux WireGuard config directory exists
+  ansible.builtin.file:
+    path: "{{ linux_wireguard_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+- name: Render Linux WireGuard hub config
+  ansible.builtin.template:
+    src: linux-wireguard-hub.conf.j2
+    dest: "{{ linux_wireguard_config_dir }}/{{ linux_wireguard_site.interface_name }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  register: linux_wireguard_config
+  no_log: "{{ linux_wireguard_hide_config_log | bool }}"
+  become: true
+
+- name: Enable and start Linux WireGuard hub service
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ linux_wireguard_site.interface_name }}"
+    enabled: true
+    state: "{{ 'restarted' if linux_wireguard_config is changed else 'started' }}"
+    daemon_reload: true
+  become: true
+
+- name: Check Linux WireGuard hub runtime
+  ansible.builtin.command: "wg show {{ linux_wireguard_site.interface_name }}"
+  register: linux_wireguard_runtime
+  changed_when: false
+  become: true
+
+- name: Validate Linux WireGuard hub runtime
+  ansible.builtin.assert:
+    that:
+      - linux_wireguard_site.interface_name in linux_wireguard_runtime.stdout
+      - linux_wireguard_site.spokes | default([]) | map(attribute='public_key') | select('in', linux_wireguard_runtime.stdout) | list | length == linux_wireguard_site.spokes | default([]) | length
+    fail_msg: "Linux WireGuard hub runtime validation failed on {{ inventory_hostname }}."

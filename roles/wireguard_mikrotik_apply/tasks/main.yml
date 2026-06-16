@@ -1,0 +1,315 @@
+---
+- name: Select resolved MikroTik WireGuard model
+  ansible.builtin.set_fact:
+    wireguard_site: "{{ resolved_wireguard_network }}"
+    mikrotik_wireguard_resolved_site_members: >-
+      {{
+        [resolved_wireguard_network.hub_member]
+        + (
+          resolved_wireguard_network.active_peers
+          | dict2items
+          | map(attribute='value')
+          | list
+        )
+      }}
+
+- name: Select WireGuard model for this MikroTik host
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_site: "{{ wireguard_site }}"
+    mikrotik_wireguard_site_members: >-
+      "{{ mikrotik_wireguard_resolved_site_members }}"
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Select WireGuard member model for this MikroTik host
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_member: >-
+      {{
+        (
+          mikrotik_wireguard_site_members
+          | selectattr('host', 'equalto', inventory_hostname)
+          | list
+        )
+        | first
+      }}
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Build MikroTik WireGuard derived values
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_interface_name: "{{ mikrotik_wireguard_member.interface_name | default(mikrotik_wireguard_site.interface_name) }}"
+    mikrotik_wireguard_managed_comment: "{{ mikrotik_wireguard_managed_comment_prefix }}:{{ mikrotik_wireguard_site.id }}"
+    mikrotik_wireguard_is_hub: "{{ mikrotik_wireguard_member.role | default('spoke') == 'hub' }}"
+    mikrotik_wireguard_preferred_transport: "{{ mikrotik_wireguard_member.preferred_transport | default(mikrotik_wireguard_site.preferred_transport | default({'type': 'public'})) }}"
+    mikrotik_wireguard_safe_mode_effective_enabled: "{{ mikrotik_wireguard_member.safe_mode.enabled | default(mikrotik_wireguard_safe_mode_enabled) }}"
+    mikrotik_wireguard_unsafe_apply_without_safe_mode_effective: "{{ mikrotik_wireguard_member.safe_mode.unsafe_apply_without_safe_mode | default(mikrotik_wireguard_unsafe_apply_without_safe_mode) }}"
+    mikrotik_wireguard_management_ssh: "{{ mikrotik_wireguard_member.management_ssh | default({}) }}"
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Build MikroTik WireGuard management SSH values
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_management_ssh_enabled: "{{ mikrotik_wireguard_management_ssh.enabled | default(true) }}"
+    mikrotik_wireguard_management_ssh_firewall_src_address: >-
+      {{
+        mikrotik_wireguard_management_ssh.firewall_src_address
+        | default(mikrotik_wireguard_site.hub_address | ansible.utils.ipaddr('address'))
+      }}
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Check existing MikroTik WireGuard interface ownership
+  community.routeros.command:
+    commands:
+      - '/interface/wireguard/print count-only where name="{{ mikrotik_wireguard_interface_name }}"'
+      - '/interface/wireguard/print detail where name="{{ mikrotik_wireguard_interface_name }}"'
+  register: mikrotik_wireguard_existing_interface
+  changed_when: false
+  failed_when: mikrotik_wireguard_existing_interface.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Validate existing MikroTik WireGuard interface ownership
+  ansible.builtin.assert:
+    that:
+      - mikrotik_wireguard_existing_interface.stdout[0] is search('(?m)^0$') or mikrotik_wireguard_managed_comment in mikrotik_wireguard_existing_interface.stdout[1]
+    fail_msg: "WireGuard interface {{ mikrotik_wireguard_interface_name }} already exists on {{ inventory_hostname }} but is not managed by {{ mikrotik_wireguard_managed_comment }}."
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Validate MikroTik WireGuard model
+  ansible.builtin.assert:
+    that:
+      - mikrotik_wireguard_member is mapping
+      - mikrotik_wireguard_member.active | default(true) | bool
+      - mikrotik_wireguard_member.address is defined
+      - mikrotik_wireguard_member.private_key is defined
+      - mikrotik_wireguard_member.private_key is not search('CHANGE_ME')
+      - mikrotik_wireguard_site.hub_public_key is defined
+      - mikrotik_wireguard_site.hub_public_key is not search('CHANGE_ME')
+      - mikrotik_wireguard_site.endpoint.host is defined
+      - mikrotik_wireguard_site.endpoint.port | int > 0
+      - mikrotik_wireguard_site.hub_allowed_ips | length > 0
+      - mikrotik_wireguard_preferred_transport.type | default('public') in ['public', 'direct']
+      - mikrotik_wireguard_safe_mode_effective_enabled | bool or mikrotik_wireguard_unsafe_apply_without_safe_mode_effective | bool
+      - not mikrotik_wireguard_is_hub | bool or mikrotik_wireguard_site.listen_port | int > 0
+    fail_msg: "WireGuard model {{ mikrotik_wireguard_site_id }} is incomplete for MikroTik host {{ inventory_hostname }}."
+  when: mikrotik_wireguard_enabled | bool
+
+- name: Apply MikroTik WireGuard changes inside Safe Mode
+  block:
+    - name: Take MikroTik Safe Mode
+      community.routeros.command:
+        commands:
+          - "{{ mikrotik_wireguard_safe_mode_take_command }}"
+      changed_when: false
+      failed_when: mikrotik_wireguard_safe_mode_take.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+      register: mikrotik_wireguard_safe_mode_take
+      when: mikrotik_wireguard_safe_mode_effective_enabled | bool
+
+    - name: Mark MikroTik Safe Mode as active
+      ansible.builtin.set_fact:
+        mikrotik_wireguard_safe_mode_taken: true
+      when: mikrotik_wireguard_safe_mode_effective_enabled | bool
+
+    - name: Apply MikroTik WireGuard interface
+      community.routeros.command:
+        commands:
+          - >-
+            :if ([:len [/interface/wireguard/find where name="{{ mikrotik_wireguard_interface_name }}"]] = 0) do={
+              /interface/wireguard/add name="{{ mikrotik_wireguard_interface_name }}"
+              private-key="{{ mikrotik_wireguard_member.private_key }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              disabled=no
+              {% if mikrotik_wireguard_is_hub | bool %}listen-port={{ mikrotik_wireguard_site.listen_port }}{% endif %}
+            } else={
+              /interface/wireguard/set [/interface/wireguard/find where name="{{ mikrotik_wireguard_interface_name }}" and comment="{{ mikrotik_wireguard_managed_comment }}"]
+              private-key="{{ mikrotik_wireguard_member.private_key }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              disabled=no
+              {% if mikrotik_wireguard_is_hub | bool %}listen-port={{ mikrotik_wireguard_site.listen_port }}{% endif %}
+            }
+      no_log: true
+      register: mikrotik_wireguard_interface_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_interface_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name|no such item|invalid internal item number)')
+
+    - name: Apply MikroTik WireGuard interface address
+      community.routeros.command:
+        commands:
+          - >-
+            :if ([:len [/ip/address/find where interface="{{ mikrotik_wireguard_interface_name }}" and comment="{{ mikrotik_wireguard_managed_comment }}"]] = 0) do={
+              /ip/address/add interface="{{ mikrotik_wireguard_interface_name }}"
+              address="{{ mikrotik_wireguard_member.address }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              disabled=no
+            } else={
+              /ip/address/set [/ip/address/find where interface="{{ mikrotik_wireguard_interface_name }}" and comment="{{ mikrotik_wireguard_managed_comment }}"]
+              address="{{ mikrotik_wireguard_member.address }}"
+              disabled=no
+            }
+      register: mikrotik_wireguard_address_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_address_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name|no such item|invalid internal item number)')
+
+    - name: Remove MikroTik WireGuard peers managed by this site
+      community.routeros.command:
+        commands:
+          - '/interface/wireguard/peers/remove [find where comment="{{ mikrotik_wireguard_managed_comment }}"]'
+      register: mikrotik_wireguard_peer_cleanup
+      changed_when: true
+      failed_when: mikrotik_wireguard_peer_cleanup.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+      when: mikrotik_wireguard_is_hub | bool
+
+    - name: Apply MikroTik WireGuard hub peers
+      community.routeros.command:
+        commands:
+          - >-
+            /interface/wireguard/peers/add
+            interface="{{ mikrotik_wireguard_interface_name }}"
+            public-key="{{ peer.public_key }}"
+            allowed-address="{{ (peer.allowed_ips | default([peer.address] + ([peer.lan_cidr] if peer.lan_cidr is defined else []))) | join(',') }}"
+            comment="{{ mikrotik_wireguard_managed_comment }}"
+            disabled=no
+      loop: "{{ mikrotik_wireguard_site_members }}"
+      loop_control:
+        loop_var: peer
+        label: "{{ peer.host }}"
+      when:
+        - mikrotik_wireguard_is_hub | bool
+        - peer.host != mikrotik_wireguard_site.hub_host
+        - peer.active | default(true) | bool
+      register: mikrotik_wireguard_hub_peer_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_hub_peer_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+
+    - name: Apply MikroTik WireGuard spoke hub peer
+      community.routeros.command:
+        commands:
+          - >-
+            :if ([:len [/interface/wireguard/peers/find where comment="{{ mikrotik_wireguard_managed_comment }}" and public-key="{{ mikrotik_wireguard_site.hub_public_key }}"]] = 0) do={
+              /interface/wireguard/peers/add
+              interface="{{ mikrotik_wireguard_interface_name }}"
+              public-key="{{ mikrotik_wireguard_site.hub_public_key }}"
+              endpoint-address="{{ mikrotik_wireguard_site.endpoint.host }}"
+              endpoint-port="{{ mikrotik_wireguard_site.endpoint.port }}"
+              persistent-keepalive="{{ mikrotik_wireguard_persistent_keepalive }}"
+              allowed-address="{{ mikrotik_wireguard_site.hub_allowed_ips | join(',') }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              disabled=no
+            } else={
+              /interface/wireguard/peers/set [/interface/wireguard/peers/find where comment="{{ mikrotik_wireguard_managed_comment }}" and public-key="{{ mikrotik_wireguard_site.hub_public_key }}"]
+              interface="{{ mikrotik_wireguard_interface_name }}"
+              endpoint-address="{{ mikrotik_wireguard_site.endpoint.host }}"
+              endpoint-port="{{ mikrotik_wireguard_site.endpoint.port }}"
+              persistent-keepalive="{{ mikrotik_wireguard_persistent_keepalive }}"
+              allowed-address="{{ mikrotik_wireguard_site.hub_allowed_ips | join(',') }}"
+              disabled=no
+            }
+      when: not (mikrotik_wireguard_is_hub | bool)
+      register: mikrotik_wireguard_spoke_peer_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_spoke_peer_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+
+    - name: Remove MikroTik WireGuard routes managed by this site
+      community.routeros.command:
+        commands:
+          - '/ip/route/remove [find where comment="{{ mikrotik_wireguard_managed_comment }}"]'
+      register: mikrotik_wireguard_route_cleanup
+      changed_when: true
+      failed_when: mikrotik_wireguard_route_cleanup.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+      when: mikrotik_wireguard_is_hub | bool
+
+    - name: Apply MikroTik spoke routes to hub allowed networks
+      community.routeros.command:
+        commands:
+          - >-
+            :if ([:len [/ip/route/find where dst-address="{{ route_target }}" and comment="{{ mikrotik_wireguard_managed_comment }}"]] = 0) do={
+              /ip/route/add
+              dst-address="{{ route_target }}"
+              gateway="{{ mikrotik_wireguard_interface_name }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              disabled=no
+            } else={
+              /ip/route/set [/ip/route/find where dst-address="{{ route_target }}" and comment="{{ mikrotik_wireguard_managed_comment }}"]
+              gateway="{{ mikrotik_wireguard_interface_name }}"
+              disabled=no
+            }
+      loop: "{{ mikrotik_wireguard_site.hub_allowed_ips }}"
+      loop_control:
+        loop_var: route_target
+        label: "{{ route_target }}"
+      when: not (mikrotik_wireguard_is_hub | bool)
+      register: mikrotik_wireguard_spoke_route_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_spoke_route_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+
+    - name: Allow MikroTik management SSH through WireGuard firewall
+      community.routeros.command:
+        commands:
+          - >-
+            :if ([:len [/ip/firewall/filter/find where comment="{{ mikrotik_wireguard_managed_comment }}" and chain="input" and protocol="tcp" and dst-port=22 and src-address="{{ mikrotik_wireguard_management_ssh_firewall_src_address }}" and in-interface="{{ mikrotik_wireguard_interface_name }}"]] = 0) do={
+              /ip/firewall/filter/add chain=input action=accept protocol=tcp dst-port=22
+              src-address="{{ mikrotik_wireguard_management_ssh_firewall_src_address }}"
+              in-interface="{{ mikrotik_wireguard_interface_name }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              place-before=0
+            } else={
+              /ip/firewall/filter/set [/ip/firewall/filter/find where comment="{{ mikrotik_wireguard_managed_comment }}" and chain="input" and protocol="tcp" and dst-port=22 and src-address="{{ mikrotik_wireguard_management_ssh_firewall_src_address }}" and in-interface="{{ mikrotik_wireguard_interface_name }}"]
+              action=accept disabled=no
+            }
+      when:
+        - mikrotik_wireguard_management_ssh_enabled | bool
+        - not (mikrotik_wireguard_is_hub | bool)
+      register: mikrotik_wireguard_management_ssh_firewall_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_management_ssh_firewall_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name|no such item|invalid internal item number)')
+
+    - name: Apply MikroTik hub routes to active peer LAN networks
+      community.routeros.command:
+        commands:
+          - >-
+            /ip/route/add
+            dst-address="{{ peer.lan_cidr }}"
+            gateway="{{ mikrotik_wireguard_interface_name }}"
+            comment="{{ mikrotik_wireguard_managed_comment }}"
+            disabled=no
+      loop: "{{ mikrotik_wireguard_site_members }}"
+      loop_control:
+        loop_var: peer
+        label: "{{ peer.host }}"
+      when:
+        - mikrotik_wireguard_is_hub | bool
+        - peer.host != mikrotik_wireguard_site.hub_host
+        - peer.active | default(true) | bool
+        - peer.lan_cidr is defined
+      register: mikrotik_wireguard_hub_route_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_hub_route_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+
+    - name: Verify MikroTik WireGuard state before releasing Safe Mode
+      ansible.builtin.include_tasks: healthcheck.yml
+
+    - name: Release MikroTik Safe Mode after successful verification
+      community.routeros.command:
+        commands:
+          - "{{ mikrotik_wireguard_safe_mode_release_command }}"
+      changed_when: false
+      failed_when: mikrotik_wireguard_safe_mode_release.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+      register: mikrotik_wireguard_safe_mode_release
+      when: mikrotik_wireguard_safe_mode_effective_enabled | bool
+
+  rescue:
+    - name: Unroll MikroTik Safe Mode after failed apply
+      community.routeros.command:
+        commands:
+          - "{{ mikrotik_wireguard_safe_mode_unroll_command }}"
+      changed_when: true
+      failed_when: false
+      when:
+        - mikrotik_wireguard_safe_mode_effective_enabled | bool
+        - mikrotik_wireguard_safe_mode_taken | default(false) | bool
+
+    - name: Fail MikroTik WireGuard apply
+      ansible.builtin.fail:
+        msg: >-
+          {{
+            'MikroTik WireGuard apply failed on ' ~ inventory_hostname ~ '; Safe Mode unroll was requested.'
+            if mikrotik_wireguard_safe_mode_taken | default(false) | bool
+            else 'MikroTik WireGuard apply failed on ' ~ inventory_hostname ~ ' without Safe Mode rollback.'
+          }}
+  when: mikrotik_wireguard_enabled | bool

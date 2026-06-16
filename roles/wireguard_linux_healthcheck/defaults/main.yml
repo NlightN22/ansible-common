@@ -1,0 +1,2 @@
+---
+wireguard_linux_healthcheck_require_hub_role: true

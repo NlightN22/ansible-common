@@ -1,0 +1,103 @@
+---
+- name: Select resolved MikroTik WireGuard model
+  ansible.builtin.set_fact:
+    wireguard_site: "{{ resolved_wireguard_network }}"
+    mikrotik_wireguard_resolved_site_members: >-
+      {{
+        [resolved_wireguard_network.hub_member]
+        + (
+          resolved_wireguard_network.active_peers
+          | dict2items
+          | map(attribute='value')
+          | list
+        )
+      }}
+
+- name: Select WireGuard model for this MikroTik host
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_site: "{{ wireguard_site }}"
+    mikrotik_wireguard_site_members: >-
+      "{{ mikrotik_wireguard_resolved_site_members }}"
+  when: mikrotik_wireguard_site is not defined
+
+- name: Select WireGuard member model for this MikroTik host
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_member: >-
+      {{
+        (
+          mikrotik_wireguard_site_members
+          | selectattr('host', 'equalto', inventory_hostname)
+          | list
+        )
+        | first
+      }}
+  when: mikrotik_wireguard_member is not defined
+
+- name: Build MikroTik WireGuard healthcheck values
+  ansible.builtin.set_fact:
+    mikrotik_wireguard_interface_name: "{{ mikrotik_wireguard_member.interface_name | default(mikrotik_wireguard_site.interface_name) }}"
+    mikrotik_wireguard_managed_comment: "{{ mikrotik_wireguard_managed_comment_prefix }}:{{ mikrotik_wireguard_site.id }}"
+    mikrotik_wireguard_is_hub: "{{ mikrotik_wireguard_member.role | default('spoke') == 'hub' }}"
+    mikrotik_wireguard_ping_targets: >-
+      {{
+        (
+          [mikrotik_wireguard_site.hub_address | ansible.utils.ipaddr('address')]
+          if inventory_hostname != mikrotik_wireguard_site.hub_host
+          else (
+            mikrotik_wireguard_site_members
+            | rejectattr('host', 'equalto', mikrotik_wireguard_site.hub_host)
+            | rejectattr('active', 'equalto', false)
+            | map(attribute='address')
+            | map('ansible.utils.ipaddr', 'address')
+            | list
+          )
+        )
+      }}
+
+- name: Check MikroTik WireGuard interface, peers, addresses, and routes
+  community.routeros.command:
+    commands:
+      - '/interface/wireguard/print count-only where name="{{ mikrotik_wireguard_interface_name }}"'
+      - '/interface/wireguard/peers/print count-only where interface="{{ mikrotik_wireguard_interface_name }}" and comment="{{ mikrotik_wireguard_managed_comment }}"'
+      - '/ip/address/print count-only where interface="{{ mikrotik_wireguard_interface_name }}" and address="{{ mikrotik_wireguard_member.address }}" and comment="{{ mikrotik_wireguard_managed_comment }}"'
+      - '/ip/route/print count-only where comment="{{ mikrotik_wireguard_managed_comment }}"'
+  register: mikrotik_wireguard_health
+  changed_when: false
+  failed_when: mikrotik_wireguard_health.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+
+- name: Validate MikroTik WireGuard static state
+  ansible.builtin.assert:
+    that:
+      - mikrotik_wireguard_health.stdout[0] is search('(?m)^1$')
+      - mikrotik_wireguard_health.stdout[1] is search('(?m)^1$')
+      - mikrotik_wireguard_health.stdout[2] is search('(?m)^1$')
+      - mikrotik_wireguard_is_hub | bool or not (mikrotik_wireguard_health.stdout[3] is search('(?m)^0$'))
+    fail_msg: "MikroTik WireGuard static state is incomplete on {{ inventory_hostname }}."
+
+- name: Check MikroTik WireGuard reachability
+  community.routeros.command:
+    commands:
+      - '/ping {{ ping_target }} count={{ mikrotik_wireguard_verify_ping_count }}'
+  loop: "{{ mikrotik_wireguard_ping_targets }}"
+  loop_control:
+    loop_var: ping_target
+    label: "{{ ping_target }}"
+  register: mikrotik_wireguard_ping
+  changed_when: false
+  failed_when: mikrotik_wireguard_ping.stdout | default([]) | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+  when:
+    - mikrotik_wireguard_verify_reachability_enabled | bool
+    - mikrotik_wireguard_ping_targets | length > 0
+
+- name: Validate MikroTik WireGuard reachability
+  ansible.builtin.assert:
+    that:
+      - "'received=0' not in item.stdout[0]"
+      - "'packet-loss=100%' not in item.stdout[0]"
+    fail_msg: "MikroTik WireGuard ping to {{ item.ping_target }} failed on {{ inventory_hostname }}."
+  loop: "{{ mikrotik_wireguard_ping.results | default([]) }}"
+  loop_control:
+    label: "{{ item.ping_target }}"
+  when:
+    - mikrotik_wireguard_verify_reachability_enabled | bool
+    - mikrotik_wireguard_ping_targets | length > 0

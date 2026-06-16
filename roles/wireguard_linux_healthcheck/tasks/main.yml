@@ -1,0 +1,38 @@
+---
+- name: Validate selected Linux WireGuard member
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network is defined
+      - resolved_wireguard_network.current_member is mapping
+      - not (wireguard_linux_healthcheck_require_hub_role | bool) or resolved_wireguard_network.current_member.role | default('spoke') == 'hub'
+      - resolved_wireguard_network.interface_name is defined
+    fail_msg: "Linux WireGuard healthcheck requires the selected WireGuard hub member."
+
+- name: Check Linux WireGuard hub runtime
+  ansible.builtin.command: "wg show {{ resolved_wireguard_network.interface_name }}"
+  register: wireguard_linux_health
+  changed_when: false
+  become: true
+
+- name: Validate Linux WireGuard hub runtime
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network.interface_name in wireguard_linux_health.stdout
+      - >-
+        resolved_wireguard_network.active_peers
+        | dict2items
+        | map(attribute='value.public_key')
+        | select('defined')
+        | select('in', wireguard_linux_health.stdout)
+        | list
+        | length
+        ==
+        (
+          resolved_wireguard_network.active_peers
+          | dict2items
+          | map(attribute='value.public_key')
+          | select('defined')
+          | list
+          | length
+        )
+    fail_msg: "Linux WireGuard healthcheck failed on {{ inventory_hostname }}."
