@@ -1,0 +1,30 @@
+---
+- name: Select XP2P member dispatch context
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_member_context
+
+- name: Run XP2P hub healthcheck
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_hub_healthcheck
+  when: xp2p_member_role == 'hub'
+
+- name: Run XP2P client healthcheck
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_client_healthcheck
+  when: xp2p_member_role == 'client'
+
+- name: Handle unsupported XP2P healthcheck member
+  ansible.builtin.fail:
+    msg: >-
+      XP2P healthcheck for role {{ xp2p_member_role }} on platform
+      {{ xp2p_member_platform }} is not implemented in ansible_common.core yet.
+  when:
+    - xp2p_member_role not in ['hub', 'client']
+    - xp2p_dispatch_unsupported_role_policy == 'fail'
+
+- name: Skip unsupported XP2P healthcheck member
+  ansible.builtin.debug:
+    msg: "Skipping unsupported XP2P healthcheck member {{ xp2p_member_role }} on {{ xp2p_member_platform }}."
+  when:
+    - xp2p_member_role not in ['hub', 'client']
+    - xp2p_dispatch_unsupported_role_policy == 'skip'

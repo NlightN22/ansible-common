@@ -1,0 +1,5 @@
+---
+xp2p_dispatch_supported_roles:
+  - hub
+  - client
+xp2p_dispatch_unsupported_role_policy: fail

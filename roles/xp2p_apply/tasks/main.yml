@@ -1,0 +1,35 @@
+---
+- name: Confirm XP2P apply operation
+  ansible.builtin.assert:
+    that:
+      - xp2p_apply_confirm | bool
+    fail_msg: "Set xp2p_apply_confirm=true to apply XP2P configuration."
+
+- name: Select XP2P member dispatch context
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_member_context
+
+- name: Apply XP2P client settings
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_client_apply
+  when: xp2p_member_role == 'client'
+
+- name: Run XP2P hub apply placeholder
+  block:
+    - name: Run XP2P hub healthcheck before hub changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.xp2p_hub_healthcheck
+
+    - name: Report XP2P hub apply scope
+      ansible.builtin.debug:
+        msg: "Declarative XP2P hub mutations are not implemented yet; inventory-backed healthcheck completed."
+  when: xp2p_member_role == 'hub'
+
+- name: Handle unsupported XP2P apply member
+  ansible.builtin.fail:
+    msg: >-
+      XP2P apply for role {{ xp2p_member_role }} on platform
+      {{ xp2p_member_platform }} is not implemented in ansible_common.core yet.
+  when:
+    - xp2p_member_role not in ['hub', 'client']
+    - xp2p_dispatch_unsupported_role_policy == 'fail'

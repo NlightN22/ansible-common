@@ -21,3 +21,14 @@
   when:
     - network_id is defined
     - (lookup('ansible.builtin.vars', architecture_model_normalized_var)).networks.get(network_id, {}).type | default('') == 'wireguard'
+
+- name: Publish selected XP2P network view
+  ansible.builtin.set_fact:
+    resolved_xp2p_network: >-
+      {{
+        lookup('ansible.builtin.vars', architecture_model_normalized_var)
+        | ansible_common.core.architecture_xp2p_view(network_id, inventory_hostname)
+      }}
+  when:
+    - network_id is defined
+    - (lookup('ansible.builtin.vars', architecture_model_normalized_var)).networks.get(network_id, {}).type | default('') == 'xp2p'

@@ -1,0 +1,23 @@
+---
+- name: Validate XP2P network context is available
+  ansible.builtin.assert:
+    that:
+      - resolved_xp2p_network is defined
+      - resolved_xp2p_network is mapping
+    fail_msg: "resolved_xp2p_network must be defined before XP2P dispatch."
+
+- name: Skip hosts that are not members of the selected XP2P network
+  ansible.builtin.meta: end_host
+  when: resolved_xp2p_network.current_member | default(None) is none
+
+- name: Select XP2P dispatch context
+  ansible.builtin.set_fact:
+    xp2p_member_role: "{{ resolved_xp2p_network.current_member.role | default('client') }}"
+    xp2p_member_platform: "{{ resolved_xp2p_network.current_member.platform | default('generic') }}"
+
+- name: Validate XP2P member role
+  ansible.builtin.assert:
+    that:
+      - xp2p_member_role in xp2p_dispatch_supported_roles
+    fail_msg: >-
+      XP2P role {{ xp2p_member_role }} is not supported for {{ inventory_hostname }}.

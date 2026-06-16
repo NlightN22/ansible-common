@@ -1,0 +1,65 @@
+---
+- name: Select XP2P server redirect model
+  ansible.builtin.set_fact:
+    xp2p_server_redirect_network: "{{ resolved_xp2p_network }}"
+
+- name: Confirm XP2P server redirect apply operation
+  ansible.builtin.assert:
+    that:
+      - xp2p_server_redirects_apply_confirm | bool
+    fail_msg: "Set xp2p_server_redirects_apply_confirm=true to apply XP2P server redirects."
+
+- name: Validate managed XP2P server redirects
+  ansible.builtin.assert:
+    that:
+      - xp2p_server_redirect_network.managed_server_redirects | length > 0
+      - xp2p_server_redirect_network.managed_server_redirects | selectattr('cidr', 'defined') | list | length == xp2p_server_redirect_network.managed_server_redirects | length
+      - xp2p_server_redirect_network.managed_server_redirects | selectattr('tag', 'defined') | list | length == xp2p_server_redirect_network.managed_server_redirects | length
+      - xp2p_server_redirect_network.managed_server_redirects | selectattr('host', 'defined') | list | length == xp2p_server_redirect_network.managed_server_redirects | length
+    fail_msg: "Managed XP2P server redirect model is empty or incomplete."
+
+- name: Export xp2p server configuration before redirect changes
+  ansible.builtin.raw: |
+    set -eu
+    export_dir="{{ xp2p_server_export_root }}"
+    export_path="${export_dir}/{{ network_id }}-before-managed-redirects-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+    mkdir -p "$export_dir"
+    xp2p server export --output "$export_path"
+    printf '%s\n' "$export_path"
+  register: xp2p_server_redirect_export
+  changed_when: true
+
+- name: Show xp2p server export path
+  ansible.builtin.debug:
+    var: xp2p_server_redirect_export.stdout
+
+- name: Read current xp2p server redirects
+  ansible.builtin.raw: xp2p server redirect list
+  register: xp2p_server_redirects_before
+  changed_when: false
+
+- name: Add missing managed xp2p server redirects
+  ansible.builtin.raw: >-
+    xp2p server redirect add
+    --cidr {{ item.cidr | quote }}
+    --tag {{ item.tag | quote }}
+    --host {{ item.host | quote }}
+    --quiet
+  loop: "{{ xp2p_server_redirect_network.managed_server_redirects }}"
+  register: xp2p_server_redirect_add
+  changed_when: true
+  when: item.cidr not in xp2p_server_redirects_before.stdout
+
+- name: Verify managed xp2p server redirects
+  ansible.builtin.raw: xp2p server redirect list
+  register: xp2p_server_redirects_after
+  changed_when: false
+
+- name: Validate managed xp2p server redirects are present
+  ansible.builtin.assert:
+    that:
+      - item.cidr in xp2p_server_redirects_after.stdout
+      - item.tag in xp2p_server_redirects_after.stdout
+      - item.host in xp2p_server_redirects_after.stdout
+    fail_msg: "Managed XP2P server redirect {{ item.cidr }} is missing on {{ inventory_hostname }}."
+  loop: "{{ xp2p_server_redirect_network.managed_server_redirects }}"

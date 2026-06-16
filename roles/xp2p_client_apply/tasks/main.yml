@@ -1,0 +1,76 @@
+---
+- name: Select XP2P client apply model
+  ansible.builtin.set_fact:
+    xp2p_client_network: "{{ resolved_xp2p_network }}"
+    xp2p_client_redirects: "{{ resolved_xp2p_network.managed_redirects }}"
+    xp2p_redirect_outbound_tag: "{{ resolved_xp2p_network.outbound_tag }}"
+
+- name: Check xp2p command
+  ansible.builtin.raw: "command -v xp2p"
+  register: xp2p_client_command_check
+  changed_when: false
+
+- name: Validate managed xp2p client redirects
+  ansible.builtin.assert:
+    that:
+      - xp2p_client_redirects | length > 0
+      - xp2p_redirect_outbound_tag | length > 0
+    fail_msg: "Managed XP2P client redirects are enabled but redirect model is empty."
+  when: xp2p_managed_redirects_enabled | bool
+
+- name: Manage xp2p client redirect list
+  ansible.builtin.raw: |
+    set -eu
+    config_path='{{ xp2p_client_config_path }}'
+    redirects_line='  redirects = [{% for redirect in xp2p_client_redirects %}{{ "" if loop.first else ", " }}{ cidr = "{{ redirect.cidr }}", domain = "{{ redirect.domain | default("") }}", no_routes = {{ redirect.no_routes | default(false) | bool | lower }}, outbound_tag = "{{ redirect.outbound_tag | default(xp2p_redirect_outbound_tag) }}" }{% endfor %}]'
+
+    test -f "$config_path"
+    before="$(cksum "$config_path" | awk '{print $1 ":" $2}')"
+    tmp_path="${config_path}.ansible.$$"
+
+    awk -v redirects_line="$redirects_line" '
+      BEGIN { replaced = 0 }
+      /^[[:space:]]*redirects[[:space:]]*=/ {
+        if (replaced == 0) {
+          print redirects_line
+          replaced = 1
+        }
+        next
+      }
+      { print }
+      END {
+        if (replaced == 0) {
+          exit 2
+        }
+      }
+    ' "$config_path" > "$tmp_path"
+
+    if cmp -s "$config_path" "$tmp_path"; then
+      rm -f "$tmp_path"
+      echo changed=false
+      exit 0
+    fi
+
+    cat "$tmp_path" > "$config_path"
+    rm -f "$tmp_path"
+    after="$(cksum "$config_path" | awk '{print $1 ":" $2}')"
+
+    if [ "$before" != "$after" ]; then
+      echo changed=true
+    else
+      echo changed=false
+    fi
+  register: xp2p_client_redirects_update
+  changed_when: "'changed=true' in xp2p_client_redirects_update.stdout"
+  when: xp2p_managed_redirects_enabled | bool
+
+- name: Wait for xp2p config watcher to settle
+  ansible.builtin.pause:
+    seconds: "{{ xp2p_redirect_settle_seconds }}"
+  when:
+    - xp2p_managed_redirects_enabled | bool
+    - xp2p_client_redirects_update is changed
+
+- name: Run XP2P client healthcheck
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_client_healthcheck

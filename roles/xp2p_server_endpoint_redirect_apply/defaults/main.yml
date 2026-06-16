@@ -1,0 +1,4 @@
+---
+xp2p_server_endpoint_redirect_apply_confirm: false
+xp2p_server_endpoint_redirect_no_routes: false
+xp2p_server_export_root: /root/xp2p-exports

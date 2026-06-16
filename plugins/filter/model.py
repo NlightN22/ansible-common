@@ -7,6 +7,9 @@ from ipaddress import ip_network
 from typing import Any
 
 from ansible.errors import AnsibleFilterError
+from ansible_collections.ansible_common.core.plugins.module_utils.xp2p_model import (
+    architecture_xp2p_view,
+)
 
 
 MODEL_VERSION = 1
@@ -405,5 +408,6 @@ class FilterModule(object):
             "architecture_is_hub": architecture_is_hub,
             "architecture_network_member": architecture_network_member,
             "architecture_wireguard_view": architecture_wireguard_view,
+            "architecture_xp2p_view": architecture_xp2p_view,
             "architecture_extension": architecture_extension,
         }

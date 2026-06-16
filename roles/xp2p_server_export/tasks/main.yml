@@ -1,0 +1,31 @@
+---
+- name: Export xp2p server configuration
+  ansible.builtin.raw: |
+    set -eu
+    export_dir="{{ xp2p_server_export_root }}"
+    export_path="${export_dir}/{{ xp2p_server_export_label }}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+    mkdir -p "$export_dir"
+    xp2p server export --output "$export_path"
+    printf '%s\n' "$export_path"
+  register: xp2p_server_export
+  changed_when: true
+
+- name: Show xp2p server export path
+  ansible.builtin.debug:
+    var: xp2p_server_export.stdout
+
+- name: Read xp2p server state after export
+  ansible.builtin.raw: |
+    set +e
+    echo '### xp2p server state'
+    xp2p server state
+    echo '### xp2p server redirect list'
+    xp2p server redirect list
+    echo '### xp2p server reverse list'
+    xp2p server reverse list
+  register: xp2p_server_state
+  changed_when: false
+
+- name: Show xp2p server state
+  ansible.builtin.debug:
+    var: xp2p_server_state.stdout_lines

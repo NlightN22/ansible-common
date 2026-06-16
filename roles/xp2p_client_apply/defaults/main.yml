@@ -1,0 +1,4 @@
+---
+xp2p_client_config_path: /etc/xp2p/xp2p-client.toml
+xp2p_managed_redirects_enabled: true
+xp2p_redirect_settle_seconds: 15

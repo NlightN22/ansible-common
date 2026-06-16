@@ -1,0 +1,20 @@
+---
+- name: Add WireGuard endpoint redirect on XP2P server
+  hosts: "{{ target_group | mandatory }}"
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+    - name: Skip non-server hosts for this XP2P network
+      ansible.builtin.meta: end_host
+      when: not (resolved_xp2p_network.is_server | default(false) | bool)
+
+  roles:
+    - role: ansible_common.core.xp2p_server_endpoint_redirect_apply

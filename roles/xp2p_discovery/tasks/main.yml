@@ -1,0 +1,72 @@
+---
+- name: Select XP2P member dispatch context
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_member_context
+
+- name: Collect XP2P hub discovery
+  ansible.builtin.shell: |
+    set +e
+    echo '### host'
+    hostname 2>/dev/null || uname -n 2>/dev/null || cat /proc/sys/kernel/hostname 2>/dev/null
+    echo '### os-release'
+    cat /etc/os-release
+    echo '### kernel'
+    uname -a
+    echo '### addresses'
+    ip -br addr
+    echo '### routes'
+    ip route
+    echo '### xp2p version'
+    xp2p --version
+    echo '### xp2p server service status'
+    xp2p server service status
+    echo '### xp2p server state'
+    xp2p server state
+    echo '### xp2p server user list'
+    xp2p server user list | sed -E 's#trojan://[^@]+@#trojan://***@#g'
+    echo '### xp2p server redirect list'
+    xp2p server redirect list
+    echo '### xp2p server forward list'
+    xp2p server forward list
+    echo '### xp2p server reverse list'
+    xp2p server reverse list
+    echo '### listeners'
+    ss -lntup
+  register: xp2p_hub_discovery
+  changed_when: false
+  when:
+    - xp2p_member_platform == 'linux'
+    - xp2p_member_role == 'hub'
+
+- name: Show XP2P hub discovery
+  ansible.builtin.debug:
+    var: xp2p_hub_discovery.stdout_lines
+  when:
+    - xp2p_member_platform == 'linux'
+    - xp2p_member_role == 'hub'
+
+- name: Collect XP2P client discovery
+  ansible.builtin.raw: |
+    set +e
+    echo '### host'
+    hostname
+    echo '### release'
+    cat /etc/openwrt_release
+    echo '### xp2p version'
+    xp2p --version
+    echo '### xp2p client service status'
+    xp2p client service status
+    echo '### xp2p client state'
+    xp2p client state
+    echo '### xp2p client list'
+    xp2p client list | sed -E 's#trojan://[^@]+@#trojan://***@#g'
+    echo '### xp2p client redirect list'
+    xp2p client redirect list
+  register: xp2p_client_discovery
+  changed_when: false
+  when: xp2p_member_role == 'client'
+
+- name: Show XP2P client discovery
+  ansible.builtin.debug:
+    var: xp2p_client_discovery.stdout_lines
+  when: xp2p_member_role == 'client'

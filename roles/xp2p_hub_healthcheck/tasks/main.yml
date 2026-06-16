@@ -1,0 +1,70 @@
+---
+- name: Select XP2P hub model
+  ansible.builtin.set_fact:
+    xp2p_hub_network: "{{ resolved_xp2p_network }}"
+
+- name: Validate XP2P hub model
+  ansible.builtin.assert:
+    that:
+      - xp2p_hub_network.hub_host == inventory_hostname
+      - xp2p_hub_network.endpoint_name | length > 0
+      - xp2p_hub_network.endpoint_host | length > 0
+      - xp2p_hub_network.clients | length > 0
+    fail_msg: "The XP2P hub model is incomplete or does not match this host."
+
+- name: Check xp2p command on hub
+  ansible.builtin.raw: xp2p --version
+  register: xp2p_hub_version
+  changed_when: false
+
+- name: Check xp2p server service status
+  ansible.builtin.raw: xp2p server service status
+  register: xp2p_hub_service_status
+  changed_when: false
+
+- name: Collect xp2p server state
+  ansible.builtin.raw: xp2p server state
+  register: xp2p_hub_state
+  changed_when: false
+
+- name: Collect xp2p server users
+  ansible.builtin.raw: xp2p server user list
+  register: xp2p_hub_users
+  changed_when: false
+  no_log: true
+
+- name: Collect xp2p server redirects
+  ansible.builtin.raw: xp2p server redirect list
+  register: xp2p_hub_redirects
+  changed_when: false
+
+- name: Collect xp2p server reverse routes
+  ansible.builtin.raw: xp2p server reverse list
+  register: xp2p_hub_reverse_routes
+  changed_when: false
+
+- name: Validate expected xp2p clients are present
+  ansible.builtin.assert:
+    that:
+      - item.user in xp2p_hub_state.stdout
+      - item.client_ip in xp2p_hub_state.stdout
+      - item.user in xp2p_hub_users.stdout
+    fail_msg: "Expected XP2P client {{ item.user }} is missing from hub state or user list."
+  loop: "{{ xp2p_hub_network.clients }}"
+
+- name: Validate xp2p server service is running
+  ansible.builtin.assert:
+    that:
+      - xp2p_hub_service_status.stdout is search('(?i)(running|active)')
+    fail_msg: "xp2p server service is not running on {{ inventory_hostname }}."
+
+- name: Validate managed xp2p server redirects are present
+  ansible.builtin.assert:
+    that:
+      - item.cidr in xp2p_hub_redirects.stdout
+      - item.tag in xp2p_hub_redirects.stdout
+      - item.host in xp2p_hub_redirects.stdout
+      - item.tag in xp2p_hub_reverse_routes.stdout
+      - item.host in xp2p_hub_reverse_routes.stdout
+    fail_msg: "Managed XP2P server redirect {{ item.cidr }} is missing or incomplete on {{ inventory_hostname }}."
+  loop: "{{ xp2p_hub_network.managed_server_redirects | default([]) }}"

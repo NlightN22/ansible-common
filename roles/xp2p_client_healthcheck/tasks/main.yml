@@ -1,0 +1,53 @@
+---
+- name: Select XP2P client model
+  ansible.builtin.set_fact:
+    xp2p_client_network: "{{ resolved_xp2p_network }}"
+    xp2p_client_model: "{{ resolved_xp2p_network.current_member }}"
+    xp2p_client_expected_redirects: >-
+      {{
+        resolved_xp2p_network.current_member.current_redirects
+        | default(resolved_xp2p_network.managed_redirects)
+      }}
+
+- name: Validate XP2P client model
+  ansible.builtin.assert:
+    that:
+      - xp2p_client_model.host == inventory_hostname
+      - xp2p_client_network.outbound_tag | length > 0
+      - xp2p_client_network.managed_redirects | length > 0
+    fail_msg: "The XP2P client model is incomplete for {{ inventory_hostname }}."
+
+- name: Check xp2p client command
+  ansible.builtin.raw: xp2p --version
+  register: xp2p_client_version
+  changed_when: false
+
+- name: Check xp2p client service status
+  ansible.builtin.raw: xp2p client service status
+  register: xp2p_client_service_status
+  changed_when: false
+
+- name: Collect xp2p client state
+  ansible.builtin.raw: xp2p client state
+  register: xp2p_client_state
+  changed_when: false
+
+- name: Collect xp2p client endpoints
+  ansible.builtin.raw: xp2p client list
+  register: xp2p_client_endpoints
+  changed_when: false
+  no_log: true
+
+- name: Collect xp2p client redirects
+  ansible.builtin.raw: xp2p client redirect list
+  register: xp2p_client_redirects_state
+  changed_when: false
+
+- name: Validate XP2P client health
+  ansible.builtin.assert:
+    that:
+      - xp2p_client_service_status.stdout is search('(?i)(running|active|enabled)')
+      - xp2p_client_network.outbound_tag in xp2p_client_state.stdout or xp2p_client_network.endpoint_name in xp2p_client_state.stdout
+      - xp2p_client_network.endpoint_name in xp2p_client_endpoints.stdout or xp2p_client_network.outbound_tag in xp2p_client_endpoints.stdout
+      - xp2p_client_expected_redirects | map(attribute='cidr') | select('in', xp2p_client_redirects_state.stdout) | list | length == xp2p_client_expected_redirects | length
+    fail_msg: "XP2P client healthcheck failed on {{ inventory_hostname }}."

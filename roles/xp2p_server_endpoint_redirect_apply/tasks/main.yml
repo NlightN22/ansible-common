@@ -1,0 +1,100 @@
+---
+- name: Select WireGuard network for XP2P endpoint redirect
+  ansible.builtin.set_fact:
+    xp2p_endpoint_redirect_wireguard_network: >-
+      {{
+        lookup('ansible.builtin.vars', architecture_model_normalized_var)
+        | ansible_common.core.architecture_wireguard_view(wireguard_network_id | mandatory)
+      }}
+
+- name: Select XP2P endpoint redirect model
+  ansible.builtin.set_fact:
+    xp2p_server_endpoint_redirect_cidr: "{{ xp2p_endpoint_redirect_wireguard_network.endpoint.host }}/32"
+    xp2p_server_endpoint_redirect_host: "{{ resolved_xp2p_network.endpoint_name }}"
+    xp2p_server_endpoint_redirect_default_tag: >-
+      {{
+        xp2p_endpoint_redirect_wireguard_network.hub_host
+        | lower
+        | regex_replace('[^a-z0-9]+', '-')
+        | regex_replace('(^-|-$)', '')
+      }}{{
+        resolved_xp2p_network.endpoint_name
+        | lower
+        | regex_replace('[^a-z0-9]+', '-')
+        | regex_replace('(^-|-$)', '')
+      }}.rev
+    xp2p_server_endpoint_redirect_tag: >-
+      {{
+        xp2p_endpoint_redirect_tag
+        | default(xp2p_server_endpoint_redirect_default_tag)
+      }}
+
+- name: Validate XP2P endpoint redirect model
+  ansible.builtin.assert:
+    that:
+      - xp2p_endpoint_redirect_wireguard_network.endpoint.host | length > 0
+      - resolved_xp2p_network.endpoint_name | length > 0
+      - xp2p_server_endpoint_redirect_tag | length > 0
+    fail_msg: "XP2P endpoint redirect model is incomplete."
+
+- name: Confirm XP2P server endpoint redirect apply operation
+  ansible.builtin.assert:
+    that:
+      - xp2p_server_endpoint_redirect_apply_confirm | bool
+    fail_msg: "Set xp2p_server_endpoint_redirect_apply_confirm=true to add the endpoint redirect."
+
+- name: Export xp2p server configuration before endpoint redirect change
+  ansible.builtin.raw: |
+    set -eu
+    export_dir="{{ xp2p_server_export_root }}"
+    export_path="${export_dir}/{{ network_id }}-before-{{ wireguard_network_id }}-endpoint-redirect-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+    mkdir -p "$export_dir"
+    xp2p server export --output "$export_path"
+    printf '%s\n' "$export_path"
+  register: xp2p_server_endpoint_redirect_export
+  changed_when: true
+
+- name: Show xp2p server export path
+  ansible.builtin.debug:
+    var: xp2p_server_endpoint_redirect_export.stdout
+
+- name: Read current xp2p server redirects
+  ansible.builtin.raw: xp2p server redirect list
+  register: xp2p_server_redirects_before
+  changed_when: false
+
+- name: Add WireGuard endpoint redirect when missing
+  ansible.builtin.raw: >-
+    xp2p server redirect add
+    --cidr {{ xp2p_server_endpoint_redirect_cidr | quote }}
+    --tag {{ xp2p_server_endpoint_redirect_tag | quote }}
+    --host {{ xp2p_server_endpoint_redirect_host | quote }}
+    --quiet
+    {{ '--no-routes' if xp2p_server_endpoint_redirect_no_routes | bool else '' }}
+  register: xp2p_server_endpoint_redirect_add
+  changed_when: true
+  when: xp2p_server_endpoint_redirect_cidr not in xp2p_server_redirects_before.stdout
+
+- name: Verify xp2p server state after endpoint redirect apply
+  ansible.builtin.raw: |
+    set +e
+    echo '### xp2p server state'
+    xp2p server state
+    echo '### xp2p server redirect list'
+    xp2p server redirect list
+    echo '### xp2p server reverse list'
+    xp2p server reverse list
+  register: xp2p_server_endpoint_redirect_state
+  changed_when: false
+
+- name: Validate endpoint redirect is present
+  ansible.builtin.assert:
+    that:
+      - xp2p_server_endpoint_redirect_cidr in xp2p_server_endpoint_redirect_state.stdout
+      - xp2p_server_endpoint_redirect_host in xp2p_server_endpoint_redirect_state.stdout
+      - xp2p_server_endpoint_redirect_tag in xp2p_server_endpoint_redirect_state.stdout
+    fail_msg: "WireGuard endpoint redirect is missing after XP2P server apply."
+
+- name: Show xp2p server state after endpoint redirect apply
+  ansible.builtin.debug:
+    var: xp2p_server_endpoint_redirect_state.stdout_lines
