@@ -9,5 +9,6 @@ mikrotik_wireguard_unsafe_apply_without_safe_mode: true
 mikrotik_wireguard_safe_mode_take_command: "/safe-mode/take on-error=abort"
 mikrotik_wireguard_safe_mode_release_command: "/safe-mode/release"
 mikrotik_wireguard_safe_mode_unroll_command: "/safe-mode/unroll"
+mikrotik_wireguard_management_icmp_enabled: true
 mikrotik_wireguard_verify_reachability_enabled: false
 mikrotik_wireguard_verify_ping_count: 3

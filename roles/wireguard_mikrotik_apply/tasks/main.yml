@@ -32,15 +32,22 @@
     mikrotik_wireguard_safe_mode_effective_enabled: "{{ mikrotik_wireguard_member.safe_mode.enabled | default(mikrotik_wireguard_safe_mode_enabled) }}"
     mikrotik_wireguard_unsafe_apply_without_safe_mode_effective: "{{ mikrotik_wireguard_member.safe_mode.unsafe_apply_without_safe_mode | default(mikrotik_wireguard_unsafe_apply_without_safe_mode) }}"
     mikrotik_wireguard_management_ssh: "{{ mikrotik_wireguard_member.management_ssh | default({}) }}"
+    mikrotik_wireguard_management_icmp: "{{ mikrotik_wireguard_member.management_icmp | default({}) }}"
   when: mikrotik_wireguard_enabled | bool
 
-- name: Build MikroTik WireGuard management SSH values
+- name: Build MikroTik WireGuard management firewall values
   ansible.builtin.set_fact:
     mikrotik_wireguard_management_ssh_enabled: "{{ mikrotik_wireguard_management_ssh.enabled | default(true) }}"
     mikrotik_wireguard_management_ssh_firewall_src_address: >-
       {{
         mikrotik_wireguard_management_ssh.firewall_src_address
         | default(mikrotik_wireguard_site.hub_address | ansible.utils.ipaddr('address'))
+      }}
+    mikrotik_wireguard_management_icmp_enabled_effective: "{{ mikrotik_wireguard_management_icmp.enabled | default(mikrotik_wireguard_management_icmp_enabled) }}"
+    mikrotik_wireguard_management_icmp_firewall_src_address: >-
+      {{
+        mikrotik_wireguard_management_icmp.firewall_src_address
+        | default(mikrotik_wireguard_management_ssh.firewall_src_address | default(mikrotik_wireguard_site.hub_address | ansible.utils.ipaddr('address')))
       }}
   when: mikrotik_wireguard_enabled | bool
 
@@ -248,6 +255,27 @@
       register: mikrotik_wireguard_management_ssh_firewall_apply
       changed_when: true
       failed_when: mikrotik_wireguard_management_ssh_firewall_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name|no such item|invalid internal item number)')
+
+    - name: Allow MikroTik ICMP through WireGuard firewall
+      community.routeros.command:
+        commands:
+          - >-
+            :if ([:len [/ip/firewall/filter/find where comment="{{ mikrotik_wireguard_managed_comment }}" and chain="input" and protocol="icmp" and src-address="{{ mikrotik_wireguard_management_icmp_firewall_src_address }}" and in-interface="{{ mikrotik_wireguard_interface_name }}"]] = 0) do={
+              /ip/firewall/filter/add chain=input action=accept protocol=icmp
+              src-address="{{ mikrotik_wireguard_management_icmp_firewall_src_address }}"
+              in-interface="{{ mikrotik_wireguard_interface_name }}"
+              comment="{{ mikrotik_wireguard_managed_comment }}"
+              place-before=0
+            } else={
+              /ip/firewall/filter/set [/ip/firewall/filter/find where comment="{{ mikrotik_wireguard_managed_comment }}" and chain="input" and protocol="icmp" and src-address="{{ mikrotik_wireguard_management_icmp_firewall_src_address }}" and in-interface="{{ mikrotik_wireguard_interface_name }}"]
+              action=accept disabled=no
+            }
+      when:
+        - mikrotik_wireguard_management_icmp_enabled_effective | bool
+        - not (mikrotik_wireguard_is_hub | bool)
+      register: mikrotik_wireguard_management_icmp_firewall_apply
+      changed_when: true
+      failed_when: mikrotik_wireguard_management_icmp_firewall_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name|no such item|invalid internal item number)')
 
     - name: Apply MikroTik hub routes to active peer LAN networks
       community.routeros.command:

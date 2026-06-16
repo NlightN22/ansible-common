@@ -202,6 +202,7 @@ delete_named_section firewall "wg_${site_id}"
 delete_named_section firewall "lan_to_wg_${site_id}"
 delete_named_section firewall "wg_${site_id}_to_lan"
 delete_named_section firewall "wg_${site_id}_to_lan_masq"
+delete_named_section firewall "allow_wg_${site_id}_icmp"
 delete_named_section firewall "allow_wg_${site_id}_wan"
 
 uci set "firewall.wg_${site_id}=zone"
@@ -220,6 +221,13 @@ uci set "firewall.lan_to_wg_${site_id}.dest=$interface_name"
 uci set "firewall.wg_${site_id}_to_lan=forwarding"
 uci set "firewall.wg_${site_id}_to_lan.src=$interface_name"
 uci set "firewall.wg_${site_id}_to_lan.dest=lan"
+
+uci set "firewall.allow_wg_${site_id}_icmp=rule"
+uci set "firewall.allow_wg_${site_id}_icmp.name=Allow-${interface_name}-ICMP"
+uci set "firewall.allow_wg_${site_id}_icmp.family=ipv4"
+uci set "firewall.allow_wg_${site_id}_icmp.src=$interface_name"
+uci set "firewall.allow_wg_${site_id}_icmp.proto=icmp"
+uci set "firewall.allow_wg_${site_id}_icmp.target=ACCEPT"
 
 {% if openwrt_wireguard_apply_member.lan_cidr is defined %}
 uci set "firewall.wg_${site_id}_to_lan_masq=nat"
