@@ -1,6 +1,46 @@
 ---
-- name: Apply XP2P members one at a time
-  hosts: "{{ target_group | mandatory }}"
+- name: Apply XP2P hub members
+  hosts: "{{ xp2p_hub_target_group | default(target_group) | mandatory }}"
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+    - name: Skip non-hub hosts for this XP2P network
+      ansible.builtin.meta: end_host
+      when: resolved_xp2p_network.current_member.role | default('') != 'hub'
+
+  roles:
+    - role: ansible_common.core.xp2p_apply
+
+- name: Apply XP2P server redirects
+  hosts: "{{ xp2p_server_target_group | default(xp2p_hub_target_group | default(target_group)) | mandatory }}"
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+    - name: Skip non-server hosts for this XP2P network
+      ansible.builtin.meta: end_host
+      when: not (resolved_xp2p_network.is_server | default(false) | bool)
+
+  roles:
+    - role: ansible_common.core.xp2p_server_redirects_apply
+
+- name: Apply XP2P client members one at a time
+  hosts: "{{ xp2p_client_target_group | default(target_group) | mandatory }}"
   gather_facts: false
   serial: 1
 
@@ -19,3 +59,23 @@
 
   roles:
     - role: ansible_common.core.xp2p_apply
+
+- name: Check XP2P members after apply
+  hosts: "{{ xp2p_healthcheck_target_group | default(target_group) | mandatory }}"
+  gather_facts: false
+
+  pre_tasks:
+    - name: End post-apply healthcheck when disabled
+      ansible.builtin.meta: end_play
+      when: not (xp2p_apply_healthcheck_enabled | default(true) | bool)
+
+    - name: Load architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+  roles:
+    - role: ansible_common.core.xp2p_healthcheck

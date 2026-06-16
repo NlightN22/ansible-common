@@ -5,6 +5,6 @@
     target_group: "{{ xp2p_server_target_group | mandatory }}"
 
 - name: Apply XP2P client redirects
-  ansible.builtin.import_playbook: xp2p_apply.yml
+  ansible.builtin.import_playbook: xp2p_client_apply.yml
   vars:
     target_group: "{{ xp2p_client_target_group | mandatory }}"
