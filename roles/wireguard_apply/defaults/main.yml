@@ -1,5 +1,6 @@
 ---
 wireguard_apply_confirm: false
+wireguard_apply_endpoint_failover_enabled: true
 wireguard_dispatch_unsupported_platform_policy: fail
 wireguard_dispatch_supported_platforms:
   - openwrt

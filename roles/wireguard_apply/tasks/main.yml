@@ -16,6 +16,17 @@
     wireguard_openwrt_apply_confirm: "{{ wireguard_apply_confirm }}"
   when: wireguard_member_platform == 'openwrt'
 
+- name: Run OpenWrt WireGuard endpoint failover apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_openwrt_endpoint_failover_apply
+  when:
+    - wireguard_apply_endpoint_failover_enabled | bool
+    - wireguard_member_platform == 'openwrt'
+    - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
+    - resolved_wireguard_network.endpoint.fallback.enabled | default(false) | bool
+    - resolved_wireguard_network.preferred_transport.type | default('public') == 'xp2p'
+    - resolved_wireguard_network.preferred_transport.failover.enabled | default(false) | bool
+
 - name: Run Linux WireGuard apply
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_linux_apply

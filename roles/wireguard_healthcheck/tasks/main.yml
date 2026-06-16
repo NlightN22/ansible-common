@@ -8,6 +8,17 @@
     name: ansible_common.core.wireguard_openwrt_healthcheck
   when: wireguard_member_platform == 'openwrt'
 
+- name: Run OpenWrt WireGuard endpoint failover healthcheck
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_openwrt_endpoint_failover_healthcheck
+  when:
+    - wireguard_healthcheck_endpoint_failover_enabled | bool
+    - wireguard_member_platform == 'openwrt'
+    - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
+    - resolved_wireguard_network.endpoint.fallback.enabled | default(false) | bool
+    - resolved_wireguard_network.preferred_transport.type | default('public') == 'xp2p'
+    - resolved_wireguard_network.preferred_transport.failover.enabled | default(false) | bool
+
 - name: Run Linux WireGuard healthcheck
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_linux_healthcheck
