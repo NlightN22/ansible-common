@@ -1,0 +1,7 @@
+---
+wireguard_endpoint_failover_site_id: "{{ resolved_wireguard_network.id }}"
+wireguard_endpoint_failover_instance_name: "wg-{{ wireguard_endpoint_failover_site_id }}-endpoint-failover"
+wireguard_endpoint_failover_script_path: "/usr/local/sbin/{{ wireguard_endpoint_failover_instance_name }}"
+wireguard_endpoint_failover_service_path: "/etc/init.d/{{ wireguard_endpoint_failover_instance_name }}"
+wireguard_endpoint_failover_service_enabled: true
+wireguard_endpoint_failover_service_interval_seconds: 10

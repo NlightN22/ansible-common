@@ -1,0 +1,67 @@
+---
+- name: Load optional WireGuard model vars
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  loop: "{{ wireguard_render_model_vars_files }}"
+
+- name: Select WireGuard render compatibility model
+  ansible.builtin.set_fact:
+    wireguard_site: >-
+      {{
+        resolved_wireguard_network
+        | combine({
+            'hub': resolved_wireguard_network.hub_member,
+            'spokes': (
+              resolved_wireguard_network.active_peers
+              | dict2items
+              | map(attribute='value')
+              | list
+            )
+          })
+      }}
+    wireguard_hub_private_key: "{{ wireguard_render_hub_private_key }}"
+    wireguard_hub_public_key: "{{ wireguard_render_hub_public_key }}"
+    wireguard_site_id: "{{ resolved_wireguard_network.id }}"
+
+- name: Ensure WireGuard render directory exists
+  ansible.builtin.file:
+    path: "{{ wireguard_render_root }}/{{ resolved_wireguard_network.id }}"
+    state: directory
+    mode: "0700"
+
+- name: Render Windows WireGuard hub config preview
+  ansible.builtin.template:
+    src: windows-hub.conf.j2
+    dest: "{{ wireguard_render_root }}/{{ resolved_wireguard_network.id }}/{{ resolved_wireguard_network.hub_host }}.conf"
+    mode: "0600"
+
+- name: Render OpenWrt WireGuard UCI previews
+  ansible.builtin.template:
+    src: openwrt-uci.sh.j2
+    dest: "{{ wireguard_render_root }}/{{ resolved_wireguard_network.id }}/{{ spoke.host }}.{{ spoke.interface_name | default(resolved_wireguard_network.interface_name) }}.uci.sh"
+    mode: "0700"
+  loop: "{{ wireguard_site.spokes | default([]) }}"
+  loop_control:
+    loop_var: spoke
+    label: "{{ spoke.host }}"
+
+- name: Render WireGuard site summary
+  ansible.builtin.copy:
+    dest: "{{ wireguard_render_root }}/{{ resolved_wireguard_network.id }}/summary.yml"
+    mode: "0600"
+    content: |
+      ---
+      network_id: {{ resolved_wireguard_network.id }}
+      hub_host: {{ resolved_wireguard_network.hub_host }}
+      interface_name: {{ resolved_wireguard_network.interface_name }}
+      listen_port: {{ resolved_wireguard_network.listen_port | default('') }}
+      network_cidr: {{ resolved_wireguard_network.network_cidr }}
+      hub_address: {{ resolved_wireguard_network.hub_address }}
+      endpoint:
+        host: {{ resolved_wireguard_network.endpoint.host }}
+        port: {{ resolved_wireguard_network.endpoint.port }}
+      peers:
+      {% for peer in wireguard_site.spokes | default([]) %}
+        - host: {{ peer.host }}
+          address: {{ peer.address }}
+      {% endfor %}

@@ -1,0 +1,138 @@
+#!/bin/sh
+# Managed by Ansible. Source: roles/openwrt_wireguard/templates/wireguard-endpoint-failover.sh.j2
+set -u
+
+instance_name='{{ openwrt_wireguard_failover_instance_name }}'
+log_tag="$instance_name"
+endpoint_host='{{ openwrt_wireguard_failover_endpoint_host }}'
+endpoint_port='{{ openwrt_wireguard_failover_endpoint_port }}'
+transport_interface='{{ openwrt_wireguard_failover_transport_interface }}'
+transport_tag='{{ openwrt_wireguard_failover_transport_tag }}'
+route_section='{{ openwrt_wireguard_failover_route_section }}'
+switch_delay_seconds='{{ openwrt_wireguard_failover_switch_delay_seconds | int }}'
+disable_route_when_dead='{{ openwrt_wireguard_failover_disable_route_when_dead | bool | lower }}'
+restore_route_when_alive='{{ openwrt_wireguard_failover_restore_route_when_alive | bool | lower }}'
+
+log() {
+  logger -t "$log_tag" "$*"
+  printf '%s\n' "$*"
+}
+
+route_disabled() {
+  disabled="$(uci -q get "network.${route_section}.disabled" 2>/dev/null || true)"
+  [ "$disabled" = "1" ] || [ "$disabled" = "true" ]
+}
+
+delete_duplicate_route_sections() {
+  endpoint_plain="${endpoint_host%/32}"
+
+  uci -q show network |
+    sed -n "s/^\([^=]*\)=route$/\1/p" |
+    while read -r section; do
+      [ "$section" != "network.${route_section}" ] || continue
+
+      target="$(uci -q get "${section}.target" 2>/dev/null || true)"
+      interface="$(uci -q get "${section}.interface" 2>/dev/null || true)"
+
+      if [ "$interface" = "$transport_interface" ] &&
+         { [ "$target" = "$endpoint_host" ] || [ "$target" = "${endpoint_plain}/32" ] || [ "$target" = "$endpoint_plain" ]; }; then
+        uci -q delete "$section" || true
+      fi
+    done
+}
+
+transport_alive() {
+  ip link show "$transport_interface" >/dev/null 2>&1 || return 1
+
+  state="$(xp2p client state 2>/dev/null || true)"
+  printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'
+}
+
+transport_dead() {
+  state="$(xp2p client state 2>/dev/null || true)"
+
+  if printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)'; then
+    return 0
+  fi
+
+  if ! printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+    return 0
+  fi
+
+  ip link show "$transport_interface" >/dev/null 2>&1 || return 0
+  return 1
+}
+
+disable_route() {
+  if route_disabled; then
+    log "route ${route_section} already disabled for ${endpoint_host}"
+    delete_duplicate_route_sections
+    uci commit network
+    /etc/init.d/network reload
+    ip route del "${endpoint_host}/32" dev "$transport_interface" >/dev/null 2>&1 || true
+    ip route del "$endpoint_host" dev "$transport_interface" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  uci set "network.${route_section}.disabled=1"
+  delete_duplicate_route_sections
+  uci commit network
+  /etc/init.d/network reload
+  ip route del "${endpoint_host}/32" dev "$transport_interface" >/dev/null 2>&1 || true
+  ip route del "$endpoint_host" dev "$transport_interface" >/dev/null 2>&1 || true
+  log "disabled route ${route_section} for ${endpoint_host}:${endpoint_port}; endpoint should use public fallback"
+}
+
+enable_route() {
+  if ! route_disabled; then
+    log "route ${route_section} already enabled for ${endpoint_host}"
+    return 0
+  fi
+
+  uci -q delete "network.${route_section}.disabled" || true
+  uci commit network
+  /etc/init.d/network reload
+  log "enabled route ${route_section} for ${endpoint_host}:${endpoint_port}; endpoint should use ${transport_interface}"
+}
+
+if transport_alive; then
+  if [ "$restore_route_when_alive" != "true" ]; then
+    log "transport ${transport_tag} is alive; restore is disabled by model"
+    exit 0
+  fi
+
+  if route_disabled; then
+    log "transport ${transport_tag} is alive; waiting ${switch_delay_seconds}s before route restore"
+    sleep "$switch_delay_seconds"
+    if transport_alive; then
+      enable_route
+    else
+      log "transport ${transport_tag} changed state during restore delay; leaving route unchanged"
+    fi
+  else
+    log "transport ${transport_tag} is alive and route ${route_section} is enabled"
+  fi
+  exit 0
+fi
+
+if transport_dead; then
+  if [ "$disable_route_when_dead" != "true" ]; then
+    log "transport ${transport_tag} is dead; disable is disabled by model"
+    exit 0
+  fi
+
+  if ! route_disabled; then
+    log "transport ${transport_tag} is dead; waiting ${switch_delay_seconds}s before route disable"
+    sleep "$switch_delay_seconds"
+    if transport_dead; then
+      disable_route
+    else
+      log "transport ${transport_tag} recovered during disable delay; leaving route unchanged"
+    fi
+  else
+    log "transport ${transport_tag} is dead and route ${route_section} is disabled"
+  fi
+  exit 0
+fi
+
+log "transport ${transport_tag} state is inconclusive; leaving route ${route_section} unchanged"

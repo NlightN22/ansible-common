@@ -1,0 +1,2 @@
+---
+wireguard_endpoint_failover_hub_check_enabled: false

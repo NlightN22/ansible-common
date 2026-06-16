@@ -1,0 +1,86 @@
+---
+- name: Select WireGuard endpoint failover values
+  ansible.builtin.set_fact:
+    openwrt_wireguard_failover_endpoint_host: "{{ resolved_wireguard_network.endpoint.host }}"
+    openwrt_wireguard_failover_endpoint_port: "{{ resolved_wireguard_network.endpoint.port }}"
+    openwrt_wireguard_failover_endpoint_fallback_enabled: "{{ resolved_wireguard_network.endpoint.fallback.enabled | default(false) }}"
+    openwrt_wireguard_failover_transport_type: "{{ resolved_wireguard_network.preferred_transport.type | default('public') }}"
+    openwrt_wireguard_failover_transport_interface: "{{ resolved_wireguard_network.preferred_transport.interface | default('') }}"
+    openwrt_wireguard_failover_transport_tag: "{{ resolved_wireguard_network.preferred_transport.outbound_tag | default('') }}"
+    openwrt_wireguard_failover_route_section: "{{ resolved_wireguard_network.preferred_transport.route.section | default('') }}"
+    openwrt_wireguard_failover_enabled: "{{ resolved_wireguard_network.preferred_transport.failover.enabled | default(false) }}"
+    openwrt_wireguard_failover_disable_route_when_dead: "{{ resolved_wireguard_network.preferred_transport.failover.disable_route_when_dead | default(true) }}"
+    openwrt_wireguard_failover_restore_route_when_alive: "{{ resolved_wireguard_network.preferred_transport.failover.restore_route_when_alive | default(true) }}"
+    openwrt_wireguard_failover_switch_delay_seconds: "{{ resolved_wireguard_network.preferred_transport.failover.switch_delay_seconds | default(30) }}"
+    openwrt_wireguard_failover_instance_name: "{{ wireguard_endpoint_failover_instance_name }}"
+    openwrt_wireguard_failover_script_path: "{{ wireguard_endpoint_failover_script_path }}"
+    openwrt_wireguard_failover_service_path: "{{ wireguard_endpoint_failover_service_path }}"
+    openwrt_wireguard_failover_service_enabled: "{{ wireguard_endpoint_failover_service_enabled }}"
+    openwrt_wireguard_failover_service_interval_seconds: "{{ wireguard_endpoint_failover_service_interval_seconds }}"
+
+- name: Validate WireGuard endpoint failover model
+  ansible.builtin.assert:
+    that:
+      - openwrt_wireguard_failover_endpoint_host | length > 0
+      - openwrt_wireguard_failover_endpoint_port | int > 0
+      - openwrt_wireguard_failover_endpoint_fallback_enabled | bool
+      - openwrt_wireguard_failover_transport_type == 'xp2p'
+      - openwrt_wireguard_failover_transport_interface | length > 0
+      - openwrt_wireguard_failover_transport_tag | length > 0
+      - openwrt_wireguard_failover_route_section | length > 0
+      - openwrt_wireguard_failover_enabled | bool
+      - openwrt_wireguard_failover_switch_delay_seconds | int >= 30
+      - openwrt_wireguard_failover_instance_name | length > 0
+      - openwrt_wireguard_failover_script_path | length > 0
+      - openwrt_wireguard_failover_service_path | length > 0
+    fail_msg: "WireGuard endpoint failover model is incomplete for {{ inventory_hostname }}."
+
+- name: Build WireGuard endpoint failover script content
+  ansible.builtin.set_fact:
+    openwrt_wireguard_failover_script_content: "{{ lookup('ansible.builtin.template', 'wireguard-endpoint-failover.sh.j2') }}"
+    openwrt_wireguard_failover_service_content: "{{ lookup('ansible.builtin.template', 'wireguard-endpoint-failover.init.j2') }}"
+
+- name: Install WireGuard endpoint failover script
+  ansible.builtin.raw: |
+    target='{{ openwrt_wireguard_failover_script_path }}'
+    tmp='/tmp/{{ openwrt_wireguard_failover_instance_name }}.ansible'
+    umask 077
+    cat > "$tmp" <<'__ANSIBLE_FAILOVER__'
+    {{ openwrt_wireguard_failover_script_content }}
+    __ANSIBLE_FAILOVER__
+    chmod 0700 "$tmp"
+    if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
+      mv "$tmp" "$target"
+      echo changed=true
+    else
+      rm -f "$tmp"
+      echo changed=false
+    fi
+  register: openwrt_wireguard_failover_install
+  changed_when: "'changed=true' in openwrt_wireguard_failover_install.stdout"
+
+- name: Install WireGuard endpoint failover init script
+  ansible.builtin.raw: |
+    target='{{ openwrt_wireguard_failover_service_path }}'
+    tmp='/tmp/{{ openwrt_wireguard_failover_instance_name }}.init.ansible'
+    umask 077
+    cat > "$tmp" <<'__ANSIBLE_FAILOVER_INIT__'
+    {{ openwrt_wireguard_failover_service_content }}
+    __ANSIBLE_FAILOVER_INIT__
+    chmod 0755 "$tmp"
+    if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
+      mv "$tmp" "$target"
+      echo changed=true
+    else
+      rm -f "$tmp"
+      echo changed=false
+    fi
+  register: openwrt_wireguard_failover_service_install
+  changed_when: "'changed=true' in openwrt_wireguard_failover_service_install.stdout"
+
+- name: Enable and restart WireGuard endpoint failover service
+  ansible.builtin.raw: |
+    {{ openwrt_wireguard_failover_service_path }} enable
+    {{ openwrt_wireguard_failover_service_path }} restart
+  changed_when: true
+  when: wireguard_endpoint_failover_service_enabled | bool

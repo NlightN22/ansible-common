@@ -1,0 +1,5 @@
+---
+wireguard_render_root: "{{ playbook_dir }}/../.tmp/generated/wireguard"
+wireguard_render_model_vars_files: []
+wireguard_render_hub_private_key: "{{ resolved_wireguard_network.hub_member.private_key | default('CHANGE_ME_WIREGUARD_HUB_PRIVATE_KEY') }}"
+wireguard_render_hub_public_key: "{{ resolved_wireguard_network.hub_public_key | default('CHANGE_ME_WIREGUARD_HUB_PUBLIC_KEY') }}"

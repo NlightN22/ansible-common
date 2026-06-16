@@ -1,0 +1,20 @@
+#!/bin/sh
+# Managed by Ansible. Source: {{ template_path | default('templates/wireguard/openwrt-uci.sh.j2') }}
+set -eu
+
+uci set network.{{ spoke.interface_name | default(wireguard_site.interface_name) }}='interface'
+uci set network.{{ spoke.interface_name | default(wireguard_site.interface_name) }}.proto='wireguard'
+uci set network.{{ spoke.interface_name | default(wireguard_site.interface_name) }}.private_key='<stored in vault>'
+uci -q delete network.{{ spoke.interface_name | default(wireguard_site.interface_name) }}.addresses || true
+uci add_list network.{{ spoke.interface_name | default(wireguard_site.interface_name) }}.addresses='{{ spoke.address }}'
+
+peer_section="$(uci add network wireguard_{{ spoke.interface_name | default(wireguard_site.interface_name) }})"
+uci set network."$peer_section".description='{{ wireguard_site.hub_host }}'
+uci set network."$peer_section".public_key='{{ wireguard_hub_public_key }}'
+uci set network."$peer_section".endpoint_host='{{ wireguard_site.endpoint.host }}'
+uci set network."$peer_section".endpoint_port='{{ wireguard_site.endpoint.port }}'
+uci set network."$peer_section".persistent_keepalive='25'
+{% for allowed_ip in wireguard_site.hub_allowed_ips %}
+uci add_list network."$peer_section".allowed_ips='{{ allowed_ip }}'
+{% endfor %}
+uci commit network
