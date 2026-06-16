@@ -1,11 +1,11 @@
 ---
 - name: Skip endpoint transport failover checks for non-xp2p WireGuard transports
   ansible.builtin.meta: end_host
-  when: resolved_wireguard_network.preferred_transport.type | default('') != 'xp2p'
+  when: resolved_wireguard_network.effective_transport.type | default('') != 'xp2p'
 
 - name: Skip endpoint transport failover checks when failover is disabled
   ansible.builtin.meta: end_host
-  when: not (resolved_wireguard_network.preferred_transport.failover.enabled | default(false) | bool)
+  when: not (resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool)
 
 - name: Skip endpoint route failover checks on the endpoint host
   ansible.builtin.meta: end_host
@@ -22,9 +22,9 @@
     rc=0
     endpoint_host='{{ resolved_wireguard_network.endpoint.host }}'
     endpoint_port='{{ resolved_wireguard_network.endpoint.port }}'
-    transport_interface='{{ resolved_wireguard_network.preferred_transport.interface }}'
-    transport_tag='{{ resolved_wireguard_network.preferred_transport.outbound_tag }}'
-    route_section='{{ resolved_wireguard_network.preferred_transport.route.section }}'
+    transport_interface='{{ resolved_wireguard_network.effective_transport.interface }}'
+    transport_tag='{{ resolved_wireguard_network.effective_transport.outbound_tag }}'
+    route_section='{{ resolved_wireguard_network.effective_transport.route.section }}'
     check_uci_value() {
       key="$1"
       expected="$2"

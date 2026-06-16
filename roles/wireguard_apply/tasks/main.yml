@@ -24,8 +24,8 @@
     - wireguard_member_platform == 'openwrt'
     - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
     - resolved_wireguard_network.endpoint.fallback.enabled | default(false) | bool
-    - resolved_wireguard_network.preferred_transport.type | default('public') == 'xp2p'
-    - resolved_wireguard_network.preferred_transport.failover.enabled | default(false) | bool
+    - resolved_wireguard_network.effective_transport.type | default('public') == 'xp2p'
+    - resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool
 
 - name: Run Linux WireGuard apply
   ansible.builtin.include_role:

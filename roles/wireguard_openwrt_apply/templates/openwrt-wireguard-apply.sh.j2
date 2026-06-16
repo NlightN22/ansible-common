@@ -9,10 +9,10 @@ spoke_private_key='{{ openwrt_wireguard_apply_member.private_key }}'
 hub_public_key='{{ wireguard_hub_public_key }}'
 endpoint_host='{{ openwrt_wireguard_apply_site.endpoint.host }}'
 endpoint_port='{{ openwrt_wireguard_apply_site.endpoint.port }}'
-{% set endpoint_route_managed = openwrt_wireguard_apply_site.preferred_transport.interface is defined and openwrt_wireguard_apply_site.preferred_transport.route is defined and openwrt_wireguard_apply_site.preferred_transport.route.section is defined %}
+{% set endpoint_route_managed = openwrt_wireguard_apply_transport.interface is defined and openwrt_wireguard_apply_transport.route is defined and openwrt_wireguard_apply_transport.route.section is defined %}
 {% if endpoint_route_managed %}
-endpoint_route_interface='{{ openwrt_wireguard_apply_site.preferred_transport.interface }}'
-endpoint_route_section='{{ openwrt_wireguard_apply_site.preferred_transport.route.section }}'
+endpoint_route_interface='{{ openwrt_wireguard_apply_transport.interface }}'
+endpoint_route_section='{{ openwrt_wireguard_apply_transport.route.section }}'
 {% endif %}
 host_role='{{ openwrt_wireguard_apply_member.role | default("spoke") }}'
 wireguard_network_cidr='{{ openwrt_wireguard_apply_site.network_cidr }}'

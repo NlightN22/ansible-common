@@ -279,6 +279,10 @@ def architecture_wireguard_view(
         view["is_hub"] = architecture_is_hub(view, node_id)
         if member is not None:
             view["current_host"] = member.get("host", node_id)
+            view["effective_transport"] = member.get(
+                "preferred_transport",
+                view.get("preferred_transport", source.get("preferred_transport", {})),
+            )
     return view
 
 

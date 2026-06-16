@@ -2,22 +2,12 @@
 - name: Select resolved Linux WireGuard model
   ansible.builtin.set_fact:
     wireguard_site: "{{ resolved_wireguard_network }}"
-    linux_wireguard_resolved_site_members: >-
-      {{
-        [resolved_wireguard_network.hub_member]
-        + (
-          resolved_wireguard_network.active_peers
-          | dict2items
-          | map(attribute='value')
-          | list
-        )
-      }}
+    linux_wireguard_resolved_site_members: "{{ [resolved_wireguard_network.hub_member] + (resolved_wireguard_network.active_peers | dict2items | map(attribute='value') | list) }}"
 
 - name: Select Linux WireGuard model
   ansible.builtin.set_fact:
     linux_wireguard_site: "{{ wireguard_site }}"
-    linux_wireguard_site_members: >-
-      "{{ linux_wireguard_resolved_site_members }}"
+    linux_wireguard_site_members: "{{ linux_wireguard_resolved_site_members }}"
 
 - name: Select Linux WireGuard member model
   ansible.builtin.set_fact:

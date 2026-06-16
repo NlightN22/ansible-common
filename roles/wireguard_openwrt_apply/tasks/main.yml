@@ -32,13 +32,13 @@
 - name: Validate WireGuard OpenWrt transport settings
   ansible.builtin.assert:
     that:
-      - resolved_wireguard_network.preferred_transport.type | default('public') in ['public', 'direct', 'xp2p']
-      - resolved_wireguard_network.preferred_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.preferred_transport.star is defined
-      - resolved_wireguard_network.preferred_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.preferred_transport.interface is defined
-      - resolved_wireguard_network.preferred_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.preferred_transport.outbound_tag is defined
-      - resolved_wireguard_network.preferred_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.preferred_transport.routed_cidrs | default([]) | length > 0
-      - resolved_wireguard_network.preferred_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.preferred_transport.route.section is defined
-      - not (resolved_wireguard_network.preferred_transport.failover.enabled | default(false) | bool) or resolved_wireguard_network.preferred_transport.failover.switch_delay_seconds | int >= 30
+      - resolved_wireguard_network.effective_transport.type | default('public') in ['public', 'direct', 'xp2p']
+      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.star is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.interface is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.outbound_tag is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.routed_cidrs | default([]) | length > 0
+      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.route.section is defined
+      - not (resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool) or resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | int >= 30
     fail_msg: "WireGuard OpenWrt transport model is incomplete for {{ inventory_hostname }}."
 
 - name: Update OpenWrt package index before WireGuard install
@@ -89,17 +89,9 @@
   ansible.builtin.set_fact:
     openwrt_wireguard_apply_site_id: "{{ resolved_wireguard_network.id }}"
     openwrt_wireguard_apply_site: "{{ resolved_wireguard_network }}"
+    openwrt_wireguard_apply_transport: "{{ resolved_wireguard_network.effective_transport | default(resolved_wireguard_network.preferred_transport | default({'type': 'public'})) }}"
     openwrt_wireguard_apply_member: "{{ resolved_wireguard_network.current_member }}"
-    openwrt_wireguard_site_members: >-
-      {{
-        [resolved_wireguard_network.hub_member]
-        + (
-          resolved_wireguard_network.active_peers
-          | dict2items
-          | map(attribute='value')
-          | list
-        )
-      }}
+    openwrt_wireguard_site_members: "{{ [resolved_wireguard_network.hub_member] + (resolved_wireguard_network.active_peers | dict2items | map(attribute='value') | list) }}"
     wireguard_hub_public_key: "{{ resolved_wireguard_network.hub_public_key }}"
 
 - name: Build WireGuard OpenWrt apply script
@@ -213,7 +205,7 @@
 - name: Validate endpoint route does not go through WireGuard
   ansible.builtin.assert:
     that:
-      - resolved_wireguard_network.is_hub | bool or resolved_wireguard_network.preferred_transport.type | default('public') != 'xp2p' or 'dev ' ~ resolved_wireguard_network.preferred_transport.interface in wireguard_openwrt_verify.stdout
+      - resolved_wireguard_network.is_hub | bool or resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or 'dev ' ~ resolved_wireguard_network.effective_transport.interface in wireguard_openwrt_verify.stdout
       - resolved_wireguard_network.is_hub | bool or 'dev ' ~ resolved_wireguard_network.interface_name in wireguard_openwrt_verify.stdout
     fail_msg: "WireGuard route validation failed on {{ inventory_hostname }}."
   when:

@@ -2,22 +2,12 @@
 - name: Select resolved MikroTik WireGuard model
   ansible.builtin.set_fact:
     wireguard_site: "{{ resolved_wireguard_network }}"
-    mikrotik_wireguard_resolved_site_members: >-
-      {{
-        [resolved_wireguard_network.hub_member]
-        + (
-          resolved_wireguard_network.active_peers
-          | dict2items
-          | map(attribute='value')
-          | list
-        )
-      }}
+    mikrotik_wireguard_resolved_site_members: "{{ [resolved_wireguard_network.hub_member] + (resolved_wireguard_network.active_peers | dict2items | map(attribute='value') | list) }}"
 
 - name: Select WireGuard model for this MikroTik host
   ansible.builtin.set_fact:
     mikrotik_wireguard_site: "{{ wireguard_site }}"
-    mikrotik_wireguard_site_members: >-
-      "{{ mikrotik_wireguard_resolved_site_members }}"
+    mikrotik_wireguard_site_members: "{{ mikrotik_wireguard_resolved_site_members }}"
   when: mikrotik_wireguard_enabled | bool
 
 - name: Select WireGuard member model for this MikroTik host
