@@ -22,6 +22,7 @@ MODEL_SECTIONS = (
 )
 MAPPING_SECTIONS = set(MODEL_SECTIONS)
 TOPOLOGIES = {"star", "hub_spoke", "mesh", "point_to_point"}
+WIREGUARD_PLATFORMS = {"openwrt", "linux", "mikrotik", "windows"}
 IP_FIELD_NAMES = {
     "address",
     "network_cidr",
@@ -253,8 +254,24 @@ def architecture_wireguard_view(
     view["preferred_transport"] = view.get("preferred_transport", source.get("preferred_transport", {}))
     view["hub_host"] = view.get("hub_host", view.get("hub"))
     view["hub_public_key"] = view.get("hub_public_key", hub_member.get("public_key"))
+    node_data = model.get("nodes", {})
+    if isinstance(node_data, dict) and isinstance(view.get("hub"), str) and isinstance(node_data.get(view["hub"]), dict):
+        view["hub_member"] = _deep_merge(view["hub_member"], node_data[view["hub"]])
+        view["members"][str(view.get("hub"))] = view["hub_member"]
+    if isinstance(node_data, dict):
+        for peer_id, peer in list(view.get("peers", {}).items()):
+            host = peer.get("host", peer_id) if isinstance(peer, dict) else peer_id
+            if isinstance(host, str) and isinstance(node_data.get(host), dict):
+                merged_peer = _deep_merge(peer, node_data[host])
+                view["peers"][peer_id] = merged_peer
+                if peer_id in view.get("active_peers", {}):
+                    view["active_peers"][peer_id] = merged_peer
+                if peer_id in view.get("members", {}):
+                    view["members"][peer_id] = merged_peer
     if node_id:
         member = architecture_network_member(view, node_id)
+        if isinstance(member, dict) and isinstance(node_data, dict) and isinstance(node_data.get(node_id), dict):
+            member = _deep_merge(member, node_data[node_id])
         view["current_member"] = member
         view["is_hub"] = architecture_is_hub(view, node_id)
         if member is not None:
@@ -316,6 +333,33 @@ def architecture_validate(model: dict[str, Any], supported_versions: Any = None)
         if not isinstance(network, dict):
             errors.append(f"architecture_model.networks.{network_id} must be a mapping")
             continue
+        if network.get("type") == "wireguard":
+            nodes = model.get("nodes", {})
+            if not isinstance(nodes, dict):
+                errors.append("architecture_model.nodes must be a mapping")
+                nodes = {}
+            hub = network.get("hub")
+            if isinstance(hub, str):
+                node = nodes.get(hub)
+                if not isinstance(node, dict):
+                    errors.append(
+                        f"architecture_model.nodes.{hub} must define platform for wireguard network {network_id!r}"
+                    )
+                elif node.get("platform") not in WIREGUARD_PLATFORMS:
+                    errors.append(
+                        f"architecture_model.nodes.{hub}.platform must be one of {sorted(WIREGUARD_PLATFORMS)}"
+                    )
+            for peer_id, peer in architecture_get_peers(network).items():
+                host = peer.get("host", peer_id) if isinstance(peer, dict) else peer_id
+                node = nodes.get(host)
+                if not isinstance(node, dict):
+                    errors.append(
+                        f"architecture_model.nodes.{host} must define platform for wireguard network {network_id!r}"
+                    )
+                elif node.get("platform") not in WIREGUARD_PLATFORMS:
+                    errors.append(
+                        f"architecture_model.nodes.{host}.platform must be one of {sorted(WIREGUARD_PLATFORMS)}"
+                    )
         topology = network.get("topology")
         if topology is not None and topology not in TOPOLOGIES:
             errors.append(f"architecture_model.networks.{network_id}.topology has unsupported value {topology!r}")

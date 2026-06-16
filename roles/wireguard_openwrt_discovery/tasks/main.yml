@@ -5,7 +5,7 @@
       - resolved_wireguard_network is defined
       - resolved_wireguard_network is mapping
       - resolved_wireguard_network.current_member is mapping
-      - not (wireguard_openwrt_discovery_require_openwrt_group | bool) or 'openwrt' in group_names
+      - resolved_wireguard_network.current_member.platform | default('') == 'openwrt'
     fail_msg: >-
       Host {{ inventory_hostname }} is not an OpenWrt member of
       WireGuard network {{ network_id | default(resolved_wireguard_network.id | default('unknown')) }}.

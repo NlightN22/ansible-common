@@ -1,6 +1,5 @@
 ---
 wireguard_openwrt_apply_confirm: false
-wireguard_openwrt_apply_require_openwrt_group: true
 wireguard_openwrt_apply_packages:
   - kmod-wireguard
   - wireguard-tools

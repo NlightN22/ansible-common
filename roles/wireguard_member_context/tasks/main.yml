@@ -17,23 +17,8 @@
     wireguard_member_platform: >-
       {{
         resolved_wireguard_network.current_member.platform
-        | default(
-            resolved_architecture.nodes[inventory_hostname].platform
-            | default('')
-          )
+        | default('')
       }}
-
-- name: Infer WireGuard member platform from generic inventory groups
-  ansible.builtin.set_fact:
-    wireguard_member_platform: "{{ item }}"
-  loop:
-    - openwrt
-    - linux
-    - mikrotik
-    - windows
-  when:
-    - wireguard_member_platform | length == 0
-    - item in group_names
 
 - name: Validate WireGuard member platform
   ansible.builtin.assert:
@@ -41,5 +26,4 @@
       - wireguard_member_platform | length > 0
     fail_msg: >-
       WireGuard member {{ inventory_hostname }} has no platform. Set
-      architecture_model.nodes.{{ inventory_hostname }}.platform or place the host
-      in a generic platform group such as openwrt, linux, mikrotik, or windows.
+      architecture_model.nodes.{{ inventory_hostname }}.platform in the model.

@@ -12,7 +12,7 @@
       - resolved_wireguard_network is mapping
       - resolved_wireguard_network.current_member is mapping
       - resolved_wireguard_network.current_member.active | default(true) | bool
-      - not (wireguard_openwrt_apply_require_openwrt_group | bool) or 'openwrt' in group_names
+      - resolved_wireguard_network.current_member.platform | default('') == 'openwrt'
       - resolved_wireguard_network.id is defined
       - resolved_wireguard_network.interface_name is defined
       - resolved_wireguard_network.current_member.address is defined

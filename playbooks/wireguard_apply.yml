@@ -23,7 +23,7 @@
         name: ansible_common.core.openwrt_rollback
       when:
         - wireguard_openwrt_rollback_enabled | default(true) | bool
-        - "'openwrt' in group_names"
+        - resolved_wireguard_network.current_member.platform | default('') == 'openwrt'
 
     - name: Arm rollback guard before WireGuard changes
       ansible.builtin.include_role:
@@ -31,7 +31,7 @@
         tasks_from: arm
       when:
         - wireguard_openwrt_rollback_enabled | default(true) | bool
-        - "'openwrt' in group_names"
+        - resolved_wireguard_network.current_member.platform | default('') == 'openwrt'
 
     - name: Apply and verify WireGuard member
       block:
@@ -46,11 +46,11 @@
           when:
             - not ansible_check_mode
             - wireguard_openwrt_rollback_enabled | default(true) | bool
-            - "'openwrt' in group_names"
+            - resolved_wireguard_network.current_member.platform | default('') == 'openwrt'
 
       rescue:
         - name: Leave rollback guard armed after failed WireGuard apply
           ansible.builtin.fail:
             msg: >-
               WireGuard apply failed on {{ inventory_hostname }}; rollback guard
-              {{ 'remains armed' if (wireguard_openwrt_rollback_enabled | default(true) | bool and 'openwrt' in group_names) else 'was disabled or not applicable for this host' }}.
+              {{ 'remains armed' if (wireguard_openwrt_rollback_enabled | default(true) | bool and resolved_wireguard_network.current_member.platform | default('') == 'openwrt') else 'was disabled or not applicable for this host' }}.
