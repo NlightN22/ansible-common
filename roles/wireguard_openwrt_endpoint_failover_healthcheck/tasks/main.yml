@@ -25,6 +25,7 @@
     transport_interface='{{ resolved_wireguard_network.effective_transport.interface }}'
     transport_tag='{{ resolved_wireguard_network.effective_transport.outbound_tag }}'
     route_section='{{ resolved_wireguard_network.effective_transport.route.section }}'
+    switch_delay_seconds='{{ resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | default(30) | int }}'
     check_uci_value() {
       key="$1"
       expected="$2"
@@ -32,6 +33,40 @@
       if [ "$actual" != "$expected" ]; then
         echo "UCI_MISMATCH key=${key} expected=${expected} actual=${actual:-<missing>}"
         rc=1
+      fi
+    }
+    detect_xp2p_status() {
+      if ip link show "$transport_interface" >/dev/null 2>&1 &&
+         printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+        xp2p_status=alive
+      elif printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)' ||
+           ! printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+        xp2p_status=dead
+      else
+        xp2p_status=unknown
+        rc=1
+      fi
+    }
+    collect_route_state() {
+      route_disabled="$(uci -q get "network.${route_section}.disabled" 2>/dev/null || true)"
+      route_get="$(ip route get "$endpoint_host" 2>&1)"
+      route_get_rc="$?"
+      [ "$route_get_rc" -eq 0 ] || rc=1
+    }
+    evaluate_route_expectation() {
+      route_expectation=failed
+      if [ "$xp2p_status" = alive ]; then
+        if [ -z "$route_disabled" ] && printf '%s\n' "$route_get" | grep -q "dev $transport_interface"; then
+          route_expectation=ok
+        else
+          route_expectation=failed_alive_should_use_xp2pc
+        fi
+      elif [ "$xp2p_status" = dead ]; then
+        if [ "$route_disabled" = 1 ] && ! printf '%s\n' "$route_get" | grep -q "dev $transport_interface"; then
+          route_expectation=ok
+        else
+          route_expectation=failed_dead_should_use_public_fallback
+        fi
       fi
     }
     echo '### xp2p client service status'
@@ -50,44 +85,33 @@
     check_uci_value "network.${route_section}.interface" "$transport_interface"
     check_uci_value "network.${route_section}.target" "$endpoint_host"
     check_uci_value "network.${route_section}.netmask" 255.255.255.255
-    route_disabled="$(uci -q get "network.${route_section}.disabled" 2>/dev/null || true)"
+    collect_route_state
     echo "ROUTE_DISABLED=${route_disabled:-0}"
     echo '### endpoint route get'
-    route_get="$(ip route get "$endpoint_host" 2>&1)"
-    route_get_rc="$?"
     printf '%s\n' "$route_get"
-    [ "$route_get_rc" -eq 0 ] || rc=1
     echo '### wireguard'
     wg show || rc=1
     echo '### hub connectivity'
     {% for address in wireguard_endpoint_failover_ping_addresses %}
     ping -c 3 {{ address }} || rc=1
     {% endfor %}
-    if ip link show "$transport_interface" >/dev/null 2>&1 &&
-       printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
-      xp2p_status=alive
-    elif printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)' ||
-         ! printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
-      xp2p_status=dead
-    else
-      xp2p_status=unknown
-      rc=1
+    detect_xp2p_status
+    evaluate_route_expectation
+    if [ "$route_expectation" != ok ] && [ "$xp2p_status" != unknown ]; then
+      echo "ROUTE_EXPECTATION_TRANSITION=waiting_${switch_delay_seconds}s"
+      sleep "$switch_delay_seconds"
+      state="$(xp2p client state 2>&1)"
+      printf '%s\n' "$state"
+      collect_route_state
+      detect_xp2p_status
+      evaluate_route_expectation
+      echo "ROUTE_DISABLED_AFTER_WAIT=${route_disabled:-0}"
+      printf '%s\n' "$route_get"
     fi
     echo "XP2P_STATUS=$xp2p_status"
-    if [ "$xp2p_status" = alive ]; then
-      if [ -z "$route_disabled" ] && printf '%s\n' "$route_get" | grep -q "dev $transport_interface"; then
-        echo 'ROUTE_EXPECTATION=ok'
-      else
-        echo 'ROUTE_EXPECTATION=failed_alive_should_use_xp2pc'
-        rc=1
-      fi
-    elif [ "$xp2p_status" = dead ]; then
-      if [ "$route_disabled" = 1 ] && ! printf '%s\n' "$route_get" | grep -q "dev $transport_interface"; then
-        echo 'ROUTE_EXPECTATION=ok'
-      else
-        echo 'ROUTE_EXPECTATION=failed_dead_should_use_public_fallback'
-        rc=1
-      fi
+    echo "ROUTE_EXPECTATION=$route_expectation"
+    if [ "$route_expectation" != ok ]; then
+      rc=1
     fi
     echo "ENDPOINT=${endpoint_host}:${endpoint_port}"
     exit "$rc"
