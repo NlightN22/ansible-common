@@ -52,6 +52,7 @@ Common logic understands these generic fields when they are present:
 - `labels`;
 - `metadata`;
 - `extensions`.
+- `platform`.
 
 ## Supported Topologies
 
@@ -82,6 +83,8 @@ Unknown `extensions` keys must be preserved during normalization. Common roles m
 Normalization publishes a stable `resolved_architecture` object. Version 1 preserves extensions, keeps the raw source under converted network entries, converts peer lists into peer maps, and applies network-level `defaults` followed by peer-level `overrides`.
 
 When `network_id` selects a WireGuard network, normalization also publishes `resolved_wireguard_network` for the current host. This capability view contains the normalized network data, `hub_member`, `members`, `active_peers`, `current_member`, and `is_hub`. Reusable WireGuard playbooks and roles should consume this resolved view instead of reading legacy `wireguard_site` directly.
+
+Model-level WireGuard operations dispatch per member platform. Prefer setting `architecture_model.nodes.<node_id>.platform` to one of `openwrt`, `linux`, `mikrotik`, or `windows`. Compatibility wrappers may infer the platform from generic inventory groups with the same names while legacy models are being migrated.
 
 WireGuard OpenWrt apply operations require `endpoint.host`, `endpoint.port`, `interface_name`, `network_cidr`, `hub_allowed_ips`, each managed member `address`, `private_key`, and a hub public key exposed as `hub_public_key` or `hub_member.public_key`. Hub members also require `listen_port`.
 

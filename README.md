@@ -12,6 +12,10 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `roles/model_validate`: validation for the versioned architecture model contract.
 - `roles/model_normalize`: normalization entry point that publishes `resolved_architecture`.
 - `roles/openwrt_rollback`: reusable OpenWrt rollback guard for risky network changes.
+- `roles/wireguard_apply`: model-level WireGuard apply dispatcher.
+- `roles/wireguard_discovery`: model-level WireGuard discovery dispatcher.
+- `roles/wireguard_healthcheck`: model-level WireGuard healthcheck dispatcher.
+- `roles/wireguard_member_context`: normalized member platform and context selection.
 - `roles/wireguard_openwrt_apply`: WireGuard OpenWrt package install, UCI apply, restart, and verification.
 - `roles/wireguard_openwrt_discovery`: read-only WireGuard OpenWrt runtime and routing discovery.
 - `roles/wireguard_openwrt_healthcheck`: read-only WireGuard OpenWrt runtime, route, UCI, and firewall checks.
@@ -23,6 +27,9 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `playbooks/normalize_model.yml`: reusable model normalization playbook.
 - `playbooks/diagnostics.yml`: reusable model diagnostics playbook.
 - `playbooks/render_network_configs.yml`: reusable normalized network rendering playbook.
+- `playbooks/wireguard_apply.yml`: model-level WireGuard apply playbook.
+- `playbooks/wireguard_discovery.yml`: model-level WireGuard discovery playbook.
+- `playbooks/wireguard_healthcheck.yml`: model-level WireGuard healthcheck playbook.
 - `playbooks/wireguard_openwrt_apply.yml`: reusable WireGuard OpenWrt apply playbook.
 - `playbooks/wireguard_openwrt_discovery.yml`: reusable WireGuard OpenWrt discovery playbook.
 - `playbooks/wireguard_openwrt_healthcheck.yml`: reusable WireGuard OpenWrt healthcheck playbook.

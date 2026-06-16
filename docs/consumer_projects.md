@@ -55,6 +55,18 @@ Consumer projects select the model file, network id, and host scope, then import
 
 The common playbook loads and normalizes the model, publishes `resolved_wireguard_network`, and runs the read-only OpenWrt checks. Inventory, vault files, real endpoints, and concrete group names remain in the consuming project.
 
+For operator-facing playbooks, prefer model-level WireGuard dispatchers. The consumer project still selects the environment model and scope; common determines each member platform and calls the platform executor.
+
+```yaml
+---
+- import_playbook: ansible_common.core.wireguard_healthcheck
+  vars:
+    architecture_model_files:
+      - "{{ inventory_env_dir }}/models/wireguard/main.yml"
+    network_id: wg_main
+    target_group: wireguard_wg_main
+```
+
 The same wrapper shape applies to read-only discovery:
 
 ```yaml

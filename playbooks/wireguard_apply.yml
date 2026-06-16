@@ -1,0 +1,56 @@
+---
+- name: Apply WireGuard members one at a time
+  hosts: "{{ target_group | mandatory }}"
+  gather_facts: false
+  serial: 1
+
+  pre_tasks:
+    - name: Load architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_load
+
+    - name: Normalize architecture model
+      ansible.builtin.include_role:
+        name: ansible_common.core.model_normalize
+
+    - name: Skip inactive WireGuard model entries
+      ansible.builtin.meta: end_host
+      when: not (resolved_wireguard_network.current_member.active | default(true) | bool)
+
+  tasks:
+    - name: Prepare rollback guard for OpenWrt network changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+      when:
+        - wireguard_openwrt_rollback_enabled | default(true) | bool
+        - "'openwrt' in group_names"
+
+    - name: Arm rollback guard before WireGuard changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+        tasks_from: arm
+      when:
+        - wireguard_openwrt_rollback_enabled | default(true) | bool
+        - "'openwrt' in group_names"
+
+    - name: Apply and verify WireGuard member
+      block:
+        - name: Dispatch WireGuard apply for selected member
+          ansible.builtin.include_role:
+            name: ansible_common.core.wireguard_apply
+
+        - name: Cancel rollback guard after successful verification
+          ansible.builtin.include_role:
+            name: ansible_common.core.openwrt_rollback
+            tasks_from: cancel
+          when:
+            - not ansible_check_mode
+            - wireguard_openwrt_rollback_enabled | default(true) | bool
+            - "'openwrt' in group_names"
+
+      rescue:
+        - name: Leave rollback guard armed after failed WireGuard apply
+          ansible.builtin.fail:
+            msg: >-
+              WireGuard apply failed on {{ inventory_hostname }}; rollback guard
+              {{ 'remains armed' if (wireguard_openwrt_rollback_enabled | default(true) | bool and 'openwrt' in group_names) else 'was disabled or not applicable for this host' }}.

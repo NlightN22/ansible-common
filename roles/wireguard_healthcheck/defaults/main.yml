@@ -1,0 +1,4 @@
+---
+wireguard_dispatch_unsupported_platform_policy: fail
+wireguard_dispatch_supported_platforms:
+  - openwrt

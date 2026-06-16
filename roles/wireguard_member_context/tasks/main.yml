@@ -1,0 +1,45 @@
+---
+- name: Validate selected WireGuard member context
+  ansible.builtin.assert:
+    that:
+      - resolved_architecture is defined
+      - resolved_architecture is mapping
+      - resolved_wireguard_network is defined
+      - resolved_wireguard_network is mapping
+      - resolved_wireguard_network.current_member is mapping
+      - not (wireguard_member_context_require_active | bool) or resolved_wireguard_network.current_member.active | default(true) | bool
+    fail_msg: >-
+      Host {{ inventory_hostname }} is not an active member of WireGuard
+      network {{ network_id | default(resolved_wireguard_network.id | default('unknown')) }}.
+
+- name: Select WireGuard member platform from model
+  ansible.builtin.set_fact:
+    wireguard_member_platform: >-
+      {{
+        resolved_wireguard_network.current_member.platform
+        | default(
+            resolved_architecture.nodes[inventory_hostname].platform
+            | default('')
+          )
+      }}
+
+- name: Infer WireGuard member platform from generic inventory groups
+  ansible.builtin.set_fact:
+    wireguard_member_platform: "{{ item }}"
+  loop:
+    - openwrt
+    - linux
+    - mikrotik
+    - windows
+  when:
+    - wireguard_member_platform | length == 0
+    - item in group_names
+
+- name: Validate WireGuard member platform
+  ansible.builtin.assert:
+    that:
+      - wireguard_member_platform | length > 0
+    fail_msg: >-
+      WireGuard member {{ inventory_hostname }} has no platform. Set
+      architecture_model.nodes.{{ inventory_hostname }}.platform or place the host
+      in a generic platform group such as openwrt, linux, mikrotik, or windows.

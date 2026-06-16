@@ -1,0 +1,33 @@
+---
+- name: Confirm WireGuard apply operation
+  ansible.builtin.assert:
+    that:
+      - wireguard_apply_confirm | bool
+    fail_msg: "Set wireguard_apply_confirm=true to apply WireGuard configuration."
+
+- name: Select WireGuard member dispatch context
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_member_context
+
+- name: Run OpenWrt WireGuard apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_openwrt_apply
+  vars:
+    wireguard_openwrt_apply_confirm: "{{ wireguard_apply_confirm }}"
+  when: wireguard_member_platform == 'openwrt'
+
+- name: Handle unsupported WireGuard apply platform
+  ansible.builtin.fail:
+    msg: >-
+      WireGuard apply for platform {{ wireguard_member_platform }} is not
+      implemented in ansible_common.core yet.
+  when:
+    - wireguard_member_platform not in wireguard_dispatch_supported_platforms
+    - wireguard_dispatch_unsupported_platform_policy == 'fail'
+
+- name: Skip unsupported WireGuard apply platform
+  ansible.builtin.debug:
+    msg: "Skipping unsupported WireGuard apply platform {{ wireguard_member_platform }}."
+  when:
+    - wireguard_member_platform not in wireguard_dispatch_supported_platforms
+    - wireguard_dispatch_unsupported_platform_policy == 'skip'

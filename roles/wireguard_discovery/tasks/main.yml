@@ -1,0 +1,25 @@
+---
+- name: Select WireGuard member dispatch context
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_member_context
+
+- name: Run OpenWrt WireGuard discovery
+  ansible.builtin.include_role:
+    name: ansible_common.core.wireguard_openwrt_discovery
+  when: wireguard_member_platform == 'openwrt'
+
+- name: Handle unsupported WireGuard discovery platform
+  ansible.builtin.fail:
+    msg: >-
+      WireGuard discovery for platform {{ wireguard_member_platform }} is not
+      implemented in ansible_common.core yet.
+  when:
+    - wireguard_member_platform not in wireguard_dispatch_supported_platforms
+    - wireguard_dispatch_unsupported_platform_policy == 'fail'
+
+- name: Skip unsupported WireGuard discovery platform
+  ansible.builtin.debug:
+    msg: "Skipping unsupported WireGuard discovery platform {{ wireguard_member_platform }}."
+  when:
+    - wireguard_member_platform not in wireguard_dispatch_supported_platforms
+    - wireguard_dispatch_unsupported_platform_policy == 'skip'
