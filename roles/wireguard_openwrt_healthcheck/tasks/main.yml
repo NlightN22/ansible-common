@@ -16,32 +16,16 @@
 
 - name: Select WireGuard OpenWrt healthcheck targets
   ansible.builtin.set_fact:
-    wireguard_openwrt_health_addresses: >-
-      {{
-        resolved_wireguard_network.hub_allowed_ips
-        | map('regex_replace', '/.*$', '')
-        | list
-      }}
+    wireguard_openwrt_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+    wireguard_openwrt_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
     wireguard_openwrt_health_ping_addresses: >-
-      {{
-        (
-          [resolved_wireguard_network.hub_address | regex_replace('/.*$', '')]
-          if not (resolved_wireguard_network.is_hub | bool)
-          else (
-            resolved_wireguard_network.active_peers
-            | dict2items
-            | map(attribute='value.address')
-            | select('defined')
-            | map('regex_replace', '/.*$', '')
-            | list
-          )
-        )
-      }}
+      {{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}
 
 - name: Check OpenWrt WireGuard and route state
   ansible.builtin.raw: |
     set +e
     rc=0
+    now="$(date +%s)"
     check_uci_value() {
       key="$1"
       expected="$2"
@@ -51,20 +35,23 @@
         rc=1
       fi
     }
-    echo '### wg'
-    wg show {{ resolved_wireguard_network.interface_name }} || rc=1
+    echo "### now ${now}"
+    echo '### interface'
+    ip link show dev {{ resolved_wireguard_network.interface_name }} || rc=1
+    echo '### dump'
+    wg show {{ resolved_wireguard_network.interface_name }} dump || rc=1
     echo '### endpoint route'
     ip route get {{ resolved_wireguard_network.endpoint.host }} || rc=1
+    {% for route_target in wireguard_openwrt_expected_route_targets %}
+    echo '### route {{ route_target }}'
+    ip route get {{ route_target | regex_replace('/.*$', '') }} || rc=1
+    {% endfor %}
+    {% if wireguard_openwrt_healthcheck_extended_ping_enabled | bool %}
     {% for address in wireguard_openwrt_health_ping_addresses %}
     echo '### ping {{ address }}'
     ping -c 3 {{ address }} || rc=1
     {% endfor %}
-    {% for address in wireguard_openwrt_health_addresses %}
-    {% if not (resolved_wireguard_network.is_hub | bool) %}
-    echo '### route {{ address }}'
-    ip route get {{ address }} || rc=1
     {% endif %}
-    {% endfor %}
     echo '### endpoint route uci'
     {% if not (resolved_wireguard_network.is_hub | bool) %}
     {% if resolved_wireguard_network.effective_transport.interface is defined and resolved_wireguard_network.effective_transport.route is defined and resolved_wireguard_network.effective_transport.route.section is defined %}
@@ -99,6 +86,7 @@
     {% else %}
     echo 'skipped on hub'
     {% endif %}
+    {% if wireguard_openwrt_healthcheck_firewall_enabled | bool %}
     echo '### firewall'
     uci show firewall | grep -E '{{ resolved_wireguard_network.interface_name }}' || true
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }} zone
@@ -113,6 +101,7 @@
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.src_ip {{ resolved_wireguard_network.network_cidr }}
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.target MASQUERADE
     {% endif %}
+    {% endif %}
     echo '### xp2p redirects'
     xp2p client redirect list || true
     exit "$rc"
@@ -122,7 +111,57 @@
 - name: Validate OpenWrt WireGuard route state
   ansible.builtin.assert:
     that:
-      - "'### wg' in wireguard_openwrt_health.stdout"
+      - "'### interface' in wireguard_openwrt_health.stdout"
+      - "'### dump' in wireguard_openwrt_health.stdout"
       - resolved_wireguard_network.is_hub | bool or 'dev ' ~ resolved_wireguard_network.interface_name in wireguard_openwrt_health.stdout
       - resolved_wireguard_network.is_hub | bool or resolved_wireguard_network.endpoint.host in wireguard_openwrt_health.stdout
     fail_msg: "WireGuard OpenWrt healthcheck failed on {{ inventory_hostname }}."
+
+- name: Validate OpenWrt WireGuard peers
+  ansible.builtin.assert:
+    that:
+      - "item.public_key in wireguard_openwrt_health.stdout"
+      - >-
+        item.allowed_ips
+        | reject('in', wireguard_openwrt_health.stdout)
+        | list
+        | length == 0
+    fail_msg: "OpenWrt WireGuard peer state is incomplete for {{ item.host | default(item.public_key) }} on {{ inventory_hostname }}."
+  loop: "{{ wireguard_openwrt_expected_peers }}"
+  loop_control:
+    label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
+
+- name: Validate OpenWrt WireGuard latest handshakes
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          wireguard_openwrt_health.stdout
+          | regex_search('(?m)^' ~ (item.public_key | regex_escape()) ~ '\t[^\t]*\t[^\t]*\t[^\t]*\t([0-9]+)\t', '\1')
+          | first
+          | default('0')
+          | int
+        ) > 0
+      - >-
+        (
+          (
+            wireguard_openwrt_health.stdout
+            | regex_search('(?m)^### now ([0-9]+)$', '\1')
+            | first
+            | default('0')
+            | int
+          )
+          -
+          (
+            wireguard_openwrt_health.stdout
+            | regex_search('(?m)^' ~ (item.public_key | regex_escape()) ~ '\t[^\t]*\t[^\t]*\t[^\t]*\t([0-9]+)\t', '\1')
+            | first
+            | default('0')
+            | int
+          )
+        ) <= wireguard_openwrt_healthcheck_handshake_max_age_seconds | int
+    fail_msg: "OpenWrt WireGuard latest handshake is stale for {{ item.host | default(item.public_key) }} on {{ inventory_hostname }}."
+  loop: "{{ wireguard_openwrt_expected_peers }}"
+  loop_control:
+    label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
+  when: wireguard_openwrt_healthcheck_handshake_enabled | bool

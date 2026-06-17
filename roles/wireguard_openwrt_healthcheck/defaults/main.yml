@@ -1,1 +1,5 @@
 ---
+wireguard_openwrt_healthcheck_extended_ping_enabled: false
+wireguard_openwrt_healthcheck_firewall_enabled: true
+wireguard_openwrt_healthcheck_handshake_enabled: false
+wireguard_openwrt_healthcheck_handshake_max_age_seconds: 300

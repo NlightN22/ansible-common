@@ -1,58 +1,72 @@
 ---
-- name: Check Chocolatey and WireGuard installation
+- name: Validate selected Windows WireGuard member
+  ansible.builtin.assert:
+    that:
+      - resolved_wireguard_network is defined
+      - resolved_wireguard_network is mapping
+      - resolved_wireguard_network.current_member is mapping
+      - resolved_wireguard_network.current_member.active | default(true) | bool
+      - resolved_wireguard_network.current_member.platform | default('') == 'windows'
+      - resolved_wireguard_network.interface_name is defined
+    fail_msg: >-
+      Host {{ inventory_hostname }} is not an active Windows member of
+      WireGuard network {{ network_id | default(resolved_wireguard_network.id | default('unknown')) }}.
+
+- name: Select Windows WireGuard expected runtime contract
+  ansible.builtin.set_fact:
+    wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}"
+    wireguard_windows_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+
+- name: Check Windows WireGuard tunnel service and runtime
   ansible.windows.win_shell: |
-    $ErrorActionPreference = 'Continue'
-    $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
+    $ErrorActionPreference = 'Stop'
+    $tunnelName = '{{ wireguard_windows_tunnel_name }}'
+    $serviceName = 'WireGuardTunnel${{ wireguard_windows_tunnel_name }}'
+    $expectedPeers = @('{{ wireguard_windows_expected_peers | to_json }}' | ConvertFrom-Json)
     $wg = Get-Command wg.exe -ErrorAction SilentlyContinue
-    $wireGuard = Get-Command wireguard.exe -ErrorAction SilentlyContinue
-    [PSCustomObject]@{
-      ChocolateyPath = if ($choco) { $choco.Source } else { $null }
-      ChocolateyVersion = if ($choco) { (& $choco.Source --version) } else { $null }
-      WgPath = if ($wg) { $wg.Source } else { $null }
-      WireGuardPath = if ($wireGuard) { $wireGuard.Source } else { $null }
-    } | ConvertTo-Json -Compress
-  register: windows_wireguard_installation
-  changed_when: false
-
-- name: Check WireGuard tunnel services
-  ansible.windows.win_shell: |
-    Get-Service -Name 'WireGuardTunnel$*' -ErrorAction SilentlyContinue |
-      Select-Object Name, Status, StartType |
-      ConvertTo-Json -Compress
-  register: windows_wireguard_services
-  changed_when: false
-
-- name: Check WireGuard config directory
-  ansible.windows.win_shell: |
-    $configRoot = '{{ resolved_wireguard_network.windows_config_dir }}'
-    if (-not (Test-Path -LiteralPath $configRoot)) {
-      [PSCustomObject]@{
-        ConfigRoot = $configRoot
-        Exists = $false
-        Configs = @()
-      } | ConvertTo-Json -Compress
-      exit 0
+    if (-not $wg) {
+      throw 'wg.exe is not available in PATH.'
     }
-    $configs = Get-ChildItem -LiteralPath $configRoot -File |
-      Select-Object Name, FullName, LastWriteTime
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if (-not $service) {
+      throw "WireGuard tunnel service $serviceName is missing."
+    }
+    if ($service.Status -ne 'Running') {
+      throw "WireGuard tunnel service $serviceName is $($service.Status), expected Running."
+    }
+    $dump = & $wg.Source show $tunnelName dump
+    if ($LASTEXITCODE -ne 0) {
+      throw "wg show $tunnelName dump failed with exit code $LASTEXITCODE."
+    }
+    $dumpText = $dump -join "`n"
+    foreach ($peer in $expectedPeers) {
+      $publicKey = [string]$peer.public_key
+      $allowedIps = @($peer.allowed_ips) -join ','
+      $line = @($dump | Where-Object { $_.StartsWith("$publicKey`t") }) | Select-Object -First 1
+      if (-not $line) {
+        throw "WireGuard peer $publicKey is missing from $tunnelName."
+      }
+      if ($line -notlike "*`t$allowedIps`t*") {
+        throw "WireGuard peer $publicKey has unexpected AllowedIPs. Expected $allowedIps."
+      }
+      {% if wireguard_windows_healthcheck_handshake_enabled | bool %}
+      $fields = $line -split "`t"
+      $latestHandshake = [int64]$fields[4]
+      $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+      if ($latestHandshake -le 0 -or ($now - $latestHandshake) -gt {{ wireguard_windows_healthcheck_handshake_max_age_seconds | int }}) {
+        throw "WireGuard peer $publicKey latest handshake is stale."
+      }
+      {% endif %}
+    }
     [PSCustomObject]@{
-      ConfigRoot = $configRoot
-      Exists = $true
-      Configs = @($configs)
+      TunnelName = $tunnelName
+      ServiceName = $serviceName
+      ServiceStatus = [string]$service.Status
+      ExpectedPeerCount = $expectedPeers.Count
     } | ConvertTo-Json -Compress
-  register: windows_wireguard_configs
+  register: windows_wireguard_health
   changed_when: false
-  when: resolved_wireguard_network.windows_config_dir is defined
 
-- name: Show Windows WireGuard installation
+- name: Show Windows WireGuard healthcheck summary
   ansible.builtin.debug:
-    var: windows_wireguard_installation.stdout
-
-- name: Show Windows WireGuard services
-  ansible.builtin.debug:
-    var: windows_wireguard_services.stdout
-
-- name: Show Windows WireGuard configs
-  ansible.builtin.debug:
-    var: windows_wireguard_configs.stdout
-  when: resolved_wireguard_network.windows_config_dir is defined
+    var: windows_wireguard_health.stdout

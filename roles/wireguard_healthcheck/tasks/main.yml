@@ -27,8 +27,6 @@
 - name: Run MikroTik WireGuard healthcheck
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_mikrotik_healthcheck
-  vars:
-    mikrotik_wireguard_verify_reachability_enabled: "{{ wireguard_mikrotik_verify_reachability_enabled | default(true) }}"
   when: wireguard_member_platform == 'mikrotik'
 
 - name: Run Windows WireGuard healthcheck

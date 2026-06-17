@@ -1,2 +1,5 @@
 ---
+wireguard_linux_healthcheck_become: false
 wireguard_linux_healthcheck_require_hub_role: true
+wireguard_linux_healthcheck_handshake_enabled: false
+wireguard_linux_healthcheck_handshake_max_age_seconds: 300

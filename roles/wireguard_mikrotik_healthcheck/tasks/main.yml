@@ -28,29 +28,15 @@
     mikrotik_wireguard_interface_name: "{{ mikrotik_wireguard_member.interface_name | default(mikrotik_wireguard_site.interface_name) }}"
     mikrotik_wireguard_managed_comment: "{{ mikrotik_wireguard_managed_comment_prefix }}:{{ mikrotik_wireguard_site.id }}"
     mikrotik_wireguard_is_hub: "{{ mikrotik_wireguard_member.role | default('spoke') == 'hub' }}"
-    mikrotik_wireguard_ping_targets: >-
-      {{
-        (
-          [mikrotik_wireguard_site.hub_address | ansible.utils.ipaddr('address')]
-          if inventory_hostname != mikrotik_wireguard_site.hub_host
-          else (
-            mikrotik_wireguard_site_members
-            | rejectattr('host', 'equalto', mikrotik_wireguard_site.hub_host)
-            | rejectattr('active', 'equalto', false)
-            | map(attribute='address')
-            | map('ansible.utils.ipaddr', 'address')
-            | list
-          )
-        )
-      }}
+    mikrotik_wireguard_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+    mikrotik_wireguard_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
+    mikrotik_wireguard_ping_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}"
 
-- name: Check MikroTik WireGuard interface, peers, addresses, and routes
+- name: Check MikroTik WireGuard interface and address
   community.routeros.command:
     commands:
-      - '/interface/wireguard/print count-only where name="{{ mikrotik_wireguard_interface_name }}"'
-      - '/interface/wireguard/peers/print count-only where interface="{{ mikrotik_wireguard_interface_name }}" and comment="{{ mikrotik_wireguard_managed_comment }}"'
-      - '/ip/address/print count-only where interface="{{ mikrotik_wireguard_interface_name }}" and address="{{ mikrotik_wireguard_member.address }}" and comment="{{ mikrotik_wireguard_managed_comment }}"'
-      - '/ip/route/print count-only where comment="{{ mikrotik_wireguard_managed_comment }}"'
+      - 'interface wireguard print count-only where name="{{ mikrotik_wireguard_interface_name }}"'
+      - 'ip address print count-only where interface="{{ mikrotik_wireguard_interface_name }}" and address="{{ mikrotik_wireguard_member.address }}" and comment="{{ mikrotik_wireguard_managed_comment }}"'
   register: mikrotik_wireguard_health
   changed_when: false
   failed_when: mikrotik_wireguard_health.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
@@ -60,14 +46,68 @@
     that:
       - mikrotik_wireguard_health.stdout[0] is search('(?m)^1$')
       - mikrotik_wireguard_health.stdout[1] is search('(?m)^1$')
-      - mikrotik_wireguard_health.stdout[2] is search('(?m)^1$')
-      - mikrotik_wireguard_is_hub | bool or not (mikrotik_wireguard_health.stdout[3] is search('(?m)^0$'))
     fail_msg: "MikroTik WireGuard static state is incomplete on {{ inventory_hostname }}."
+
+- name: Check MikroTik WireGuard peers
+  community.routeros.command:
+    commands:
+      - >-
+        interface wireguard peers print detail where
+        interface="{{ mikrotik_wireguard_interface_name }}"
+        and public-key="{{ item.public_key }}"
+        and comment="{{ mikrotik_wireguard_managed_comment }}"
+  loop: "{{ mikrotik_wireguard_expected_peers }}"
+  loop_control:
+    label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
+  register: mikrotik_wireguard_peer_health
+  changed_when: false
+  failed_when: mikrotik_wireguard_peer_health.stdout | default([]) | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+
+- name: Validate MikroTik WireGuard peers
+  ansible.builtin.assert:
+    that:
+      - item.item.public_key in item.stdout[0]
+      - >-
+        item.item.allowed_ips
+        | reject('in', item.stdout[0])
+        | list
+        | length == 0
+    fail_msg: "MikroTik WireGuard peer state is incomplete for {{ item.item.host | default(item.item.public_key) }} on {{ inventory_hostname }}."
+  loop: "{{ mikrotik_wireguard_peer_health.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.host | default(item.item.public_key | default('unknown-peer')) }}"
+
+- name: Check MikroTik spoke routes to selected WireGuard network
+  community.routeros.command:
+    commands:
+      - >-
+        ip route print count-only where
+        dst-address="{{ route_target }}"
+        and gateway="{{ mikrotik_wireguard_interface_name }}"
+        and comment="{{ mikrotik_wireguard_managed_comment }}"
+  loop: "{{ mikrotik_wireguard_expected_route_targets }}"
+  loop_control:
+    loop_var: route_target
+    label: "{{ route_target }}"
+  register: mikrotik_wireguard_route_health
+  changed_when: false
+  failed_when: mikrotik_wireguard_route_health.stdout | default([]) | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+  when: not (mikrotik_wireguard_is_hub | bool)
+
+- name: Validate MikroTik spoke routes to selected WireGuard network
+  ansible.builtin.assert:
+    that:
+      - item.stdout[0] is search('(?m)^1$')
+    fail_msg: "MikroTik WireGuard route {{ item.route_target }} is missing on {{ inventory_hostname }}."
+  loop: "{{ mikrotik_wireguard_route_health.results | default([]) }}"
+  loop_control:
+    label: "{{ item.route_target }}"
+  when: not (mikrotik_wireguard_is_hub | bool)
 
 - name: Check MikroTik WireGuard reachability
   community.routeros.command:
     commands:
-      - '/ping {{ ping_target }} count={{ mikrotik_wireguard_verify_ping_count }}'
+      - 'ping {{ ping_target }} count={{ mikrotik_wireguard_verify_ping_count }}'
   loop: "{{ mikrotik_wireguard_ping_targets }}"
   loop_control:
     loop_var: ping_target

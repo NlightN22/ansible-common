@@ -8,31 +8,75 @@
       - resolved_wireguard_network.interface_name is defined
     fail_msg: "Linux WireGuard healthcheck requires the selected WireGuard hub member."
 
-- name: Check Linux WireGuard hub runtime
-  ansible.builtin.command: "wg show {{ resolved_wireguard_network.interface_name }}"
+- name: Select Linux WireGuard expected runtime contract
+  ansible.builtin.set_fact:
+    wireguard_linux_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+    wireguard_linux_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
+
+- name: Check Linux WireGuard runtime
+  ansible.builtin.shell: |
+    set -eu
+    interface='{{ resolved_wireguard_network.interface_name }}'
+    echo "### now $(date +%s)"
+    echo '### interface'
+    ip link show dev "$interface"
+    echo '### dump'
+    wg show "$interface" dump
+    echo '### routes'
+    {% for route_target in wireguard_linux_expected_route_targets %}
+    ip route get {{ route_target | regex_replace('/.*$', '') }}
+    {% endfor %}
   register: wireguard_linux_health
   changed_when: false
-  become: true
+  become: "{{ wireguard_linux_healthcheck_become | bool }}"
 
-- name: Validate Linux WireGuard hub runtime
+- name: Validate Linux WireGuard runtime
   ansible.builtin.assert:
     that:
-      - resolved_wireguard_network.interface_name in wireguard_linux_health.stdout
+      - "'### interface' in wireguard_linux_health.stdout"
+      - "'### dump' in wireguard_linux_health.stdout"
+      - "item.public_key in wireguard_linux_health.stdout"
       - >-
-        resolved_wireguard_network.active_peers
-        | dict2items
-        | map(attribute='value.public_key')
-        | select('defined')
-        | select('in', wireguard_linux_health.stdout)
+        item.allowed_ips
+        | reject('in', wireguard_linux_health.stdout)
         | list
-        | length
-        ==
-        (
-          resolved_wireguard_network.active_peers
-          | dict2items
-          | map(attribute='value.public_key')
-          | select('defined')
-          | list
-          | length
-        )
+        | length == 0
     fail_msg: "Linux WireGuard healthcheck failed on {{ inventory_hostname }}."
+  loop: "{{ wireguard_linux_expected_peers }}"
+  loop_control:
+    label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
+
+- name: Validate Linux WireGuard latest handshakes
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          wireguard_linux_health.stdout
+          | regex_search('(?m)^' ~ (item.public_key | regex_escape()) ~ '\t[^\t]*\t[^\t]*\t[^\t]*\t([0-9]+)\t', '\1')
+          | first
+          | default('0')
+          | int
+        ) > 0
+      - >-
+        (
+          (
+            wireguard_linux_health.stdout
+            | regex_search('(?m)^### now ([0-9]+)$', '\1')
+            | first
+            | default('0')
+            | int
+          )
+          -
+          (
+            wireguard_linux_health.stdout
+            | regex_search('(?m)^' ~ (item.public_key | regex_escape()) ~ '\t[^\t]*\t[^\t]*\t[^\t]*\t([0-9]+)\t', '\1')
+            | first
+            | default('0')
+            | int
+          )
+        ) <= wireguard_linux_healthcheck_handshake_max_age_seconds | int
+    fail_msg: "Linux WireGuard latest handshake is stale for {{ item.host | default(item.public_key) }} on {{ inventory_hostname }}."
+  loop: "{{ wireguard_linux_expected_peers }}"
+  loop_control:
+    label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
+  when: wireguard_linux_healthcheck_handshake_enabled | bool
