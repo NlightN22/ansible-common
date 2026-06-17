@@ -3,12 +3,6 @@
   ansible.builtin.set_fact:
     xp2p_server_redirect_network: "{{ resolved_xp2p_network }}"
 
-- name: Confirm XP2P server redirect apply operation
-  ansible.builtin.assert:
-    that:
-      - xp2p_server_redirects_apply_confirm | bool
-    fail_msg: "Set xp2p_server_redirects_apply_confirm=true to apply XP2P server redirects."
-
 - name: Validate managed XP2P server redirects
   ansible.builtin.assert:
     that:

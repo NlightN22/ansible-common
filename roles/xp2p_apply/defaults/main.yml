@@ -1,3 +1,2 @@
 ---
-xp2p_apply_confirm: false
 xp2p_dispatch_unsupported_role_policy: fail

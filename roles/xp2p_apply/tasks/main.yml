@@ -1,10 +1,4 @@
 ---
-- name: Confirm XP2P apply operation
-  ansible.builtin.assert:
-    that:
-      - xp2p_apply_confirm | bool
-    fail_msg: "Set xp2p_apply_confirm=true to apply XP2P configuration."
-
 - name: Select XP2P member dispatch context
   ansible.builtin.include_role:
     name: ansible_common.core.xp2p_member_context
