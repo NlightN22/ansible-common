@@ -115,9 +115,7 @@ else
     done
 fi
 
-{% if endpoint_route_managed %}
 delete_route_target "$endpoint_host"
-{% endif %}
 {% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
 delete_route_target "{{ allowed_ip }}"
 {% endfor %}
@@ -155,7 +153,7 @@ while IFS='|' read -r peer_host peer_public_key peer_allowed_ips; do
   done
 done <<'__ANSIBLE_WIREGUARD_PEERS__'
 {% for peer in openwrt_wireguard_site_members if peer.host != openwrt_wireguard_apply_site.hub_host and (peer.active | default(true)) %}
-{% set peer_allowed_ips = peer.allowed_ips | default([peer.address] + ([peer.lan_cidr] if peer.lan_cidr is defined else [])) %}
+{% set peer_allowed_ips = peer | ansible_common.core.wireguard_peer_allowed_ips(openwrt_wireguard_apply_site.hub_allowed_ips | default([])) %}
 {{ peer.host }}|{{ peer.public_key }}|{{ peer_allowed_ips | join(' ') }}
 {% endfor %}
 __ANSIBLE_WIREGUARD_PEERS__

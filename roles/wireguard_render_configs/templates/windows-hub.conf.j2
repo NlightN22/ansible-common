@@ -19,7 +19,7 @@ PublicKey = {{ spoke.public_key }}
 {% set spoke_site_lans = [spoke_site_lans] %}
 {% endif %}
 {% set spoke_site_lan = spoke.site_lan_cidr | default(spoke_hostvars.site_lan_cidr | default('')) %}
-{% set spoke_allowed_ips = spoke.allowed_ips | default([spoke.address] + spoke_site_lans + ([spoke_site_lan] if spoke_site_lan else [])) %}
+{% set spoke_allowed_ips = spoke | ansible_common.core.wireguard_peer_allowed_ips(wireguard_site.hub_allowed_ips | default([])) %}
 AllowedIPs = {{ spoke_allowed_ips | join(', ') }}
 
 {% endfor %}

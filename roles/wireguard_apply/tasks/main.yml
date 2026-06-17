@@ -27,6 +27,31 @@
     - resolved_wireguard_network.effective_transport.type | default('public') == 'xp2p'
     - resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool
 
+- name: Remove stale OpenWrt WireGuard endpoint failover service
+  ansible.builtin.raw: |
+    service_path='{{ wireguard_endpoint_failover_service_path | default("/etc/init.d/wg-" ~ resolved_wireguard_network.id ~ "-endpoint-failover") }}'
+    script_path='{{ wireguard_endpoint_failover_script_path | default("/usr/local/sbin/wg-" ~ resolved_wireguard_network.id ~ "-endpoint-failover") }}'
+    changed=false
+    if [ -e "$service_path" ]; then
+      if [ -x "$service_path" ]; then
+        "$service_path" stop >/dev/null 2>&1 || true
+        "$service_path" disable >/dev/null 2>&1 || true
+      fi
+      rm -f "$service_path"
+      changed=true
+    fi
+    if [ -e "$script_path" ]; then
+      rm -f "$script_path"
+      changed=true
+    fi
+    echo "changed=$changed"
+  register: wireguard_apply_stale_endpoint_failover_cleanup
+  changed_when: "'changed=true' in wireguard_apply_stale_endpoint_failover_cleanup.stdout"
+  when:
+    - wireguard_member_platform == 'openwrt'
+    - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
+    - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or not (resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool)
+
 - name: Run Linux WireGuard apply
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_linux_apply

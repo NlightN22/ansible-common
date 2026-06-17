@@ -159,7 +159,7 @@
             /interface/wireguard/peers/add
             interface="{{ mikrotik_wireguard_interface_name }}"
             public-key="{{ peer.public_key }}"
-            allowed-address="{{ (peer.allowed_ips | default([peer.address] + ([peer.lan_cidr] if peer.lan_cidr is defined else []))) | join(',') }}"
+            allowed-address="{{ (peer | ansible_common.core.wireguard_peer_allowed_ips(mikrotik_wireguard_site.hub_allowed_ips | default([]))) | join(',') }}"
             comment="{{ mikrotik_wireguard_managed_comment }}"
             disabled=no
       loop: "{{ mikrotik_wireguard_site_members }}"
@@ -300,7 +300,8 @@
       failed_when: mikrotik_wireguard_hub_route_apply.stdout | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
 
     - name: Verify MikroTik WireGuard state before releasing Safe Mode
-      ansible.builtin.include_tasks: healthcheck.yml
+      ansible.builtin.include_role:
+        name: ansible_common.core.wireguard_mikrotik_healthcheck
 
     - name: Release MikroTik Safe Mode after successful verification
       community.routeros.command:

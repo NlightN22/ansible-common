@@ -22,7 +22,10 @@
     $ErrorActionPreference = 'Stop'
     $tunnelName = '{{ wireguard_windows_tunnel_name }}'
     $serviceName = 'WireGuardTunnel${{ wireguard_windows_tunnel_name }}'
-    $expectedPeers = @('{{ wireguard_windows_expected_peers | to_json }}' | ConvertFrom-Json)
+    $expectedPeers = '{{ wireguard_windows_expected_peers | to_json }}' | ConvertFrom-Json
+    if ($expectedPeers -isnot [array]) {
+      $expectedPeers = @($expectedPeers)
+    }
     $wg = Get-Command wg.exe -ErrorAction SilentlyContinue
     if (-not $wg) {
       throw 'wg.exe is not available in PATH.'
