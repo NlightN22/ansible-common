@@ -1,0 +1,237 @@
+---
+- name: Validate OpenWrt route control mode
+  ansible.builtin.assert:
+    that:
+      - openwrt_route_control_mode in ['audit', 'cleanup']
+    fail_msg: "openwrt_route_control_mode must be one of: audit, cleanup."
+
+- name: Initialize OpenWrt route control model fragments
+  ansible.builtin.set_fact:
+    openwrt_route_control_loaded_model_fragments: "{{ openwrt_route_control_model_fragments }}"
+
+- name: Load OpenWrt route control model files
+  ansible.builtin.include_vars:
+    file: "{{ openwrt_route_control_model_file }}"
+    name: openwrt_route_control_loaded_model_fragment
+  loop: "{{ openwrt_route_control_model_files }}"
+  loop_control:
+    loop_var: openwrt_route_control_model_file
+    label: "{{ openwrt_route_control_model_file }}"
+  register: openwrt_route_control_loaded_model_file_results
+  when: openwrt_route_control_model_files | length > 0
+
+- name: Collect OpenWrt route control model fragments
+  ansible.builtin.set_fact:
+    openwrt_route_control_loaded_model_fragments: >-
+      {{
+        openwrt_route_control_loaded_model_fragments
+        + [openwrt_route_control_loaded_model_file_result.ansible_facts.openwrt_route_control_loaded_model_fragment]
+      }}
+  loop: "{{ openwrt_route_control_loaded_model_file_results.results | default([]) }}"
+  loop_control:
+    loop_var: openwrt_route_control_loaded_model_file_result
+    label: "{{ openwrt_route_control_loaded_model_file_result.ansible_included_var_files | default([]) | first | default('fragment') }}"
+  when: openwrt_route_control_model_files | length > 0
+
+- name: Build OpenWrt declared route state from models
+  ansible.builtin.set_fact:
+    openwrt_route_control_projected_state: >-
+      {{
+        openwrt_route_control_loaded_model_fragments
+        | ansible_common.core.openwrt_route_control_declared_state(inventory_hostname)
+      }}
+
+- name: Publish effective OpenWrt route control state
+  ansible.builtin.set_fact:
+    openwrt_route_control_effective_declared_routes: >-
+      {{ openwrt_route_control_declared_routes + openwrt_route_control_projected_state.declared_routes }}
+    openwrt_route_control_effective_declared_rules: >-
+      {{ openwrt_route_control_declared_rules + openwrt_route_control_projected_state.declared_rules }}
+    openwrt_route_control_effective_excluded_routes: >-
+      {{ openwrt_route_control_excluded_routes + openwrt_route_control_projected_state.excluded_routes }}
+    openwrt_route_control_effective_excluded_rules: >-
+      {{ openwrt_route_control_excluded_rules + openwrt_route_control_projected_state.excluded_rules }}
+
+- name: Confirm OpenWrt route cleanup operation
+  ansible.builtin.assert:
+    that:
+      - openwrt_route_control_cleanup_confirm | bool
+      - >-
+        openwrt_route_control_allow_empty_declared_state | bool
+        or openwrt_route_control_effective_declared_routes | length > 0
+        or openwrt_route_control_effective_declared_rules | length > 0
+    fail_msg: >-
+      Set openwrt_route_control_cleanup_confirm=true and provide declared
+      routes/rules before cleanup, or explicitly set
+      openwrt_route_control_allow_empty_declared_state=true.
+  when: openwrt_route_control_mode == 'cleanup'
+
+- name: Collect OpenWrt routing state
+  ansible.builtin.raw: |
+    set +e
+    echo '### ip route show table all'
+    ip -4 route show table all
+    echo '### ip rule show'
+    ip -4 rule show
+    echo '### uci show network'
+    uci -q show network
+  register: openwrt_route_control_collect
+  changed_when: false
+
+- name: Build OpenWrt route control plan
+  ansible.builtin.set_fact:
+    openwrt_route_control_plan: >-
+      {{
+        openwrt_route_control_collect.stdout
+        | ansible_common.core.openwrt_route_control_plan_from_collect(
+            openwrt_route_control_effective_declared_routes,
+            openwrt_route_control_effective_declared_rules,
+            openwrt_route_control_effective_excluded_routes,
+            openwrt_route_control_effective_excluded_rules
+          )
+      }}
+
+- name: Show OpenWrt route control report
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      declared_routes: "{{ openwrt_route_control_plan.declared_routes }}"
+      declared_rules: "{{ openwrt_route_control_plan.declared_rules }}"
+      missing_routes: "{{ openwrt_route_control_plan.missing_routes }}"
+      changed_routes: "{{ openwrt_route_control_plan.changed_routes }}"
+      extra_routes: "{{ openwrt_route_control_plan.extra_routes }}"
+      extra_uci_routes: "{{ openwrt_route_control_plan.extra_uci_routes }}"
+      missing_rules: "{{ openwrt_route_control_plan.missing_rules }}"
+      changed_rules: "{{ openwrt_route_control_plan.changed_rules }}"
+      extra_rules: "{{ openwrt_route_control_plan.extra_rules }}"
+      extra_uci_rules: "{{ openwrt_route_control_plan.extra_uci_rules }}"
+      cleanup_route_commands: "{{ openwrt_route_control_plan.cleanup_route_commands }}"
+      cleanup_rule_commands: "{{ openwrt_route_control_plan.cleanup_rule_commands }}"
+      apply_route_commands: "{{ openwrt_route_control_plan.apply_route_commands }}"
+      apply_rule_commands: "{{ openwrt_route_control_plan.apply_rule_commands }}"
+      cleanup_uci_sections: "{{ openwrt_route_control_plan.cleanup_uci_sections }}"
+
+- name: Validate OpenWrt route control audit result
+  ansible.builtin.assert:
+    that:
+      - openwrt_route_control_plan.missing_routes | length == 0
+      - openwrt_route_control_plan.changed_routes | length == 0
+      - openwrt_route_control_plan.extra_routes | length == 0
+      - openwrt_route_control_plan.extra_uci_routes | length == 0
+      - openwrt_route_control_plan.missing_rules | length == 0
+      - openwrt_route_control_plan.changed_rules | length == 0
+      - openwrt_route_control_plan.extra_rules | length == 0
+      - openwrt_route_control_plan.extra_uci_rules | length == 0
+    fail_msg: "OpenWrt route/rule drift detected on {{ inventory_hostname }}."
+  when:
+    - openwrt_route_control_mode == 'audit'
+    - openwrt_route_control_fail_on_drift | bool
+    - >-
+      not (
+        openwrt_route_control_report_only_when_declared_empty | bool
+        and openwrt_route_control_effective_declared_routes | length == 0
+        and openwrt_route_control_effective_declared_rules | length == 0
+      )
+
+- name: Remove unmanaged runtime OpenWrt rules
+  ansible.builtin.raw: "{{ item }}"
+  loop: "{{ openwrt_route_control_plan.cleanup_rule_commands }}"
+  changed_when: true
+  when: openwrt_route_control_mode == 'cleanup'
+
+- name: Remove unmanaged runtime OpenWrt routes
+  ansible.builtin.raw: "{{ item }}"
+  loop: "{{ openwrt_route_control_plan.cleanup_route_commands }}"
+  changed_when: true
+  when: openwrt_route_control_mode == 'cleanup'
+
+- name: Apply missing runtime OpenWrt routes
+  ansible.builtin.raw: "{{ item }}"
+  loop: "{{ openwrt_route_control_plan.apply_route_commands }}"
+  changed_when: true
+  when:
+    - openwrt_route_control_mode == 'cleanup'
+    - openwrt_route_control_apply_missing_enabled | bool
+
+- name: Apply missing runtime OpenWrt rules
+  ansible.builtin.raw: "{{ item }}"
+  loop: "{{ openwrt_route_control_plan.apply_rule_commands }}"
+  changed_when: true
+  when:
+    - openwrt_route_control_mode == 'cleanup'
+    - openwrt_route_control_apply_missing_enabled | bool
+
+- name: Remove unmanaged persistent OpenWrt route/rule UCI sections
+  ansible.builtin.raw: |
+    uci -q delete {{ item }} && uci commit network
+  loop: "{{ openwrt_route_control_plan.cleanup_uci_sections }}"
+  changed_when: true
+  when:
+    - openwrt_route_control_mode == 'cleanup'
+    - openwrt_route_control_cleanup_uci_enabled | bool
+
+- name: Reload OpenWrt network after persistent route cleanup
+  ansible.builtin.raw: /etc/init.d/network reload
+  changed_when: true
+  when:
+    - openwrt_route_control_mode == 'cleanup'
+    - openwrt_route_control_cleanup_uci_enabled | bool
+    - openwrt_route_control_reload_network_after_cleanup | bool
+    - openwrt_route_control_plan.cleanup_uci_sections | length > 0
+
+- name: Collect OpenWrt routing state after cleanup
+  ansible.builtin.raw: |
+    set +e
+    echo '### ip route show table all'
+    ip -4 route show table all
+    echo '### ip rule show'
+    ip -4 rule show
+    echo '### uci show network'
+    uci -q show network
+  register: openwrt_route_control_collect_after
+  changed_when: false
+  when: openwrt_route_control_mode == 'cleanup'
+
+- name: Build OpenWrt route control plan after cleanup
+  ansible.builtin.set_fact:
+    openwrt_route_control_plan_after: >-
+      {{
+        openwrt_route_control_collect_after.stdout
+        | ansible_common.core.openwrt_route_control_plan_from_collect(
+            openwrt_route_control_effective_declared_routes,
+            openwrt_route_control_effective_declared_rules,
+            openwrt_route_control_effective_excluded_routes,
+            openwrt_route_control_effective_excluded_rules
+          )
+      }}
+  when: openwrt_route_control_mode == 'cleanup'
+
+- name: Show OpenWrt route control report after cleanup
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      missing_routes: "{{ openwrt_route_control_plan_after.missing_routes }}"
+      changed_routes: "{{ openwrt_route_control_plan_after.changed_routes }}"
+      extra_routes: "{{ openwrt_route_control_plan_after.extra_routes }}"
+      missing_rules: "{{ openwrt_route_control_plan_after.missing_rules }}"
+      changed_rules: "{{ openwrt_route_control_plan_after.changed_rules }}"
+      extra_rules: "{{ openwrt_route_control_plan_after.extra_rules }}"
+      extra_uci_routes: "{{ openwrt_route_control_plan_after.extra_uci_routes }}"
+      extra_uci_rules: "{{ openwrt_route_control_plan_after.extra_uci_rules }}"
+  when: openwrt_route_control_mode == 'cleanup'
+
+- name: Validate OpenWrt route control cleanup result
+  ansible.builtin.assert:
+    that:
+      - openwrt_route_control_plan_after.missing_routes | length == 0
+      - openwrt_route_control_plan_after.changed_routes | length == 0
+      - openwrt_route_control_plan_after.extra_routes | length == 0
+      - openwrt_route_control_plan_after.extra_uci_routes | length == 0
+      - openwrt_route_control_plan_after.missing_rules | length == 0
+      - openwrt_route_control_plan_after.changed_rules | length == 0
+      - openwrt_route_control_plan_after.extra_rules | length == 0
+      - openwrt_route_control_plan_after.extra_uci_rules | length == 0
+    fail_msg: "OpenWrt route/rule drift remains after cleanup on {{ inventory_hostname }}."
+  when:
+    - openwrt_route_control_mode == 'cleanup'
+    - openwrt_route_control_fail_on_drift | bool

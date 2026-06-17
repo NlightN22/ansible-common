@@ -1,0 +1,16 @@
+---
+openwrt_route_control_mode: audit
+openwrt_route_control_fail_on_drift: true
+openwrt_route_control_report_only_when_declared_empty: true
+openwrt_route_control_cleanup_confirm: false
+openwrt_route_control_allow_empty_declared_state: false
+openwrt_route_control_apply_missing_enabled: true
+openwrt_route_control_cleanup_uci_enabled: false
+openwrt_route_control_reload_network_after_cleanup: true
+
+openwrt_route_control_model_files: []
+openwrt_route_control_model_fragments: []
+openwrt_route_control_declared_routes: []
+openwrt_route_control_declared_rules: []
+openwrt_route_control_excluded_routes: []
+openwrt_route_control_excluded_rules: []
