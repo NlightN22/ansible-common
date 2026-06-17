@@ -10,6 +10,34 @@
   register: xp2p_client_command_check
   changed_when: false
 
+- name: Ensure xp2p client init script exists
+  ansible.builtin.raw: test -x /etc/init.d/xp2p-client
+  changed_when: false
+
+- name: Ensure xp2p client service starts on boot
+  ansible.builtin.raw: |
+    changed=false
+    if ! /etc/init.d/xp2p-client enabled >/dev/null 2>&1; then
+      /etc/init.d/xp2p-client enable
+      changed=true
+    fi
+    echo "changed=$changed"
+  register: xp2p_client_service_enable
+  changed_when: "'changed=true' in xp2p_client_service_enable.stdout"
+  when: xp2p_client_service_enabled | bool
+
+- name: Ensure xp2p client service is not enabled on boot
+  ansible.builtin.raw: |
+    changed=false
+    if /etc/init.d/xp2p-client enabled >/dev/null 2>&1; then
+      /etc/init.d/xp2p-client disable
+      changed=true
+    fi
+    echo "changed=$changed"
+  register: xp2p_client_service_disable
+  changed_when: "'changed=true' in xp2p_client_service_disable.stdout"
+  when: not (xp2p_client_service_enabled | bool)
+
 - name: Validate managed xp2p client redirects
   ansible.builtin.assert:
     that:
