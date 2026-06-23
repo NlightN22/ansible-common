@@ -10,6 +10,8 @@ from ansible.errors import AnsibleFilterError
 
 
 SYSTEM_RULE_PRIORITIES = {"0", "32766", "32767"}
+EXTERNAL_UPLINK_INTERFACES = {"wan", "wan6"}
+EXTERNAL_UPLINK_PREFIXES = ("pppoe-",)
 
 
 def _items(value: Any, name: str) -> list[dict[str, Any]]:
@@ -256,9 +258,18 @@ def _rule_add_command(rule: dict[str, str]) -> str:
 def _is_safe_extra_route(route: dict[str, str]) -> bool:
     if (route["target"] == "default" and route["table"] == "main") or route["table"] in {"local", "255"}:
         return False
+    if _is_external_uplink_interface(route["dev"]):
+        return False
     proto = route.get("proto", "")
     scope = route.get("scope", "")
     return not (proto == "kernel" or scope == "link")
+
+
+def _is_external_uplink_interface(interface: str) -> bool:
+    interface = _clean(interface)
+    return interface in EXTERNAL_UPLINK_INTERFACES or any(
+        interface.startswith(prefix) for prefix in EXTERNAL_UPLINK_PREFIXES
+    )
 
 
 def _is_safe_extra_rule(rule: dict[str, str]) -> bool:
@@ -324,7 +335,9 @@ def openwrt_route_control_plan(
     ]
     extra_uci_routes = [
         route for route in uci_routes
-        if _route_key(route) not in declared_route_keys and _route_key(route) not in excluded_route_keys
+        if _route_key(route) not in declared_route_keys
+        and _route_key(route) not in excluded_route_keys
+        and _is_safe_extra_route(route)
     ]
     extra_uci_rules = [
         rule for rule in uci_rules
