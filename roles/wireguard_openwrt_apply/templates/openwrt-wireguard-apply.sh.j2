@@ -41,16 +41,16 @@ delete_named_section() {
   uci -q delete "${config}.${section}" || true
 }
 
-delete_route_target() {
-  route_target="$1"
-  route_target_plain="${route_target%/32}"
-
+delete_named_sections_by_prefix() {
+  config="$1"
+  prefix="$2"
   uci -q show network |
     sed -n "s/^\([^=]*\)=route$/\1/p" |
     while read -r section; do
-      target="$(uci -q get "${section}.target" || true)"
-      [ "$target" = "$route_target" ] || [ "$target" = "$route_target_plain" ] || continue
-      uci -q delete "$section" || true
+      section_name="${section#${config}.}"
+      case "$section_name" in
+        "${prefix}"*) uci -q delete "$section" || true ;;
+      esac
     done
 }
 
@@ -115,14 +115,11 @@ else
     done
 fi
 
-delete_route_target "$endpoint_host"
-{% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
-delete_route_target "{{ allowed_ip }}"
-{% endfor %}
-{% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
-{% for peer in openwrt_wireguard_site_members if peer.host != openwrt_wireguard_apply_site.hub_host and (peer.active | default(true)) and peer.lan_cidr is defined %}
-delete_route_target "{{ peer.lan_cidr }}"
-{% endfor %}
+{% if endpoint_route_managed %}
+delete_named_section network "$endpoint_route_section"
+{% endif %}
+{% if openwrt_wireguard_apply_member.role | default('spoke') != 'hub' %}
+delete_named_sections_by_prefix network "${site_id}_wg_hub_route_"
 {% endif %}
 
 uci set "network.${interface_name}=interface"
