@@ -26,4 +26,6 @@
       - wireguard_member_platform | length > 0
     fail_msg: >-
       WireGuard member {{ inventory_hostname }} has no platform. Set
-      architecture_model.nodes.{{ inventory_hostname }}.platform in the model.
+      platform on the selected WireGuard hub/peer member, or use
+      architecture_model.nodes.{{ inventory_hostname }}.platform only as a
+      host metadata fallback.

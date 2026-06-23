@@ -206,11 +206,32 @@ def architecture_is_hub(network: dict[str, Any], node_id: str) -> bool:
 
 
 def _network_hub_member(network: dict[str, Any]) -> dict[str, Any]:
+    canonical_hub_member = network.get("hub_member")
+    if isinstance(canonical_hub_member, dict):
+        return _deep_merge({"role": "hub", "host": network.get("hub")}, canonical_hub_member)
     source = network.get("source", {})
     hub_member = source.get("hub") if isinstance(source, dict) else None
     if isinstance(hub_member, dict):
         return _deep_merge({"role": "hub", "host": network.get("hub")}, hub_member)
     return {"role": "hub", "host": network.get("hub")}
+
+
+def _member_node_id(member: dict[str, Any], fallback: str) -> str:
+    value = member.get("host")
+    if isinstance(value, str) and value:
+        return value
+    return fallback
+
+
+def _member_platform(member: dict[str, Any], nodes: dict[str, Any], fallback_id: str) -> Any:
+    platform = member.get("platform")
+    if platform:
+        return platform
+    node_id = _member_node_id(member, fallback_id)
+    node = nodes.get(node_id) if isinstance(nodes, dict) else None
+    if isinstance(node, dict):
+        return node.get("platform")
+    return None
 
 
 def architecture_network_member(network: dict[str, Any], node_id: str) -> dict[str, Any] | None:
@@ -347,25 +368,27 @@ def architecture_validate(model: dict[str, Any], supported_versions: Any = None)
                 nodes = {}
             hub = network.get("hub")
             if isinstance(hub, str):
-                node = nodes.get(hub)
-                if not isinstance(node, dict):
+                hub_member = _network_hub_member(network)
+                platform = _member_platform(hub_member, nodes, hub)
+                if not platform:
                     errors.append(
-                        f"architecture_model.nodes.{hub} must define platform for wireguard network {network_id!r}"
+                        f"architecture_model.networks.{network_id}.hub member {hub!r} must define platform"
                     )
-                elif node.get("platform") not in WIREGUARD_PLATFORMS:
+                elif platform not in WIREGUARD_PLATFORMS:
                     errors.append(
-                        f"architecture_model.nodes.{hub}.platform must be one of {sorted(WIREGUARD_PLATFORMS)}"
+                        f"architecture_model.networks.{network_id}.hub member {hub!r} platform must be one of {sorted(WIREGUARD_PLATFORMS)}"
                     )
             for peer_id, peer in architecture_get_peers(network).items():
-                host = peer.get("host", peer_id) if isinstance(peer, dict) else peer_id
-                node = nodes.get(host)
-                if not isinstance(node, dict):
+                peer_model = peer if isinstance(peer, dict) else {"host": peer_id}
+                host = peer_model.get("host", peer_id)
+                platform = _member_platform(peer_model, nodes, peer_id)
+                if not platform:
                     errors.append(
-                        f"architecture_model.nodes.{host} must define platform for wireguard network {network_id!r}"
+                        f"architecture_model.networks.{network_id}.peers.{peer_id} member {host!r} must define platform"
                     )
-                elif node.get("platform") not in WIREGUARD_PLATFORMS:
+                elif platform not in WIREGUARD_PLATFORMS:
                     errors.append(
-                        f"architecture_model.nodes.{host}.platform must be one of {sorted(WIREGUARD_PLATFORMS)}"
+                        f"architecture_model.networks.{network_id}.peers.{peer_id} member {host!r} platform must be one of {sorted(WIREGUARD_PLATFORMS)}"
                     )
         topology = network.get("topology")
         if topology is not None and topology not in TOPOLOGIES:

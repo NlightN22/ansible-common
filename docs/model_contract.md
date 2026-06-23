@@ -84,10 +84,12 @@ Normalization publishes a stable `resolved_architecture` object. Version 1 prese
 
 When `network_id` selects a WireGuard network, normalization also publishes `resolved_wireguard_network` for the current host. This capability view contains the normalized network data, `hub_member`, `members`, `active_peers`, `current_member`, and `is_hub`. Reusable WireGuard playbooks and roles should consume this resolved view instead of reading legacy `wireguard_site` directly.
 
-Model-level WireGuard operations dispatch per member platform. The platform is part
-of the model contract and must be declared on each WireGuard node as
-`architecture_model.nodes.<node_id>.platform` with one of `openwrt`, `linux`,
-`mikrotik`, or `windows`.
+Model-level WireGuard operations dispatch per member platform. The platform is
+part of the network member contract and must be declared on each WireGuard hub
+and peer member with one of `openwrt`, `linux`, `mikrotik`, or `windows`.
+`architecture_model.nodes.<node_id>.platform` remains supported as an optional
+host metadata fallback, but consumer models should not duplicate network
+membership only to provide platform data.
 
 WireGuard OpenWrt apply operations require `endpoint.host`, `endpoint.port`, `interface_name`, `network_cidr`, `hub_allowed_ips`, each managed member `address`, `private_key`, and a hub public key exposed as `hub_public_key` or `hub_member.public_key`. Hub members also require `listen_port`.
 
@@ -99,10 +101,8 @@ architecture_model:
   nodes:
     hub01:
       role: hub
-      platform: linux
     edge01:
       role: peer
-      platform: openwrt
   networks:
     wg_main:
       type: wireguard
@@ -116,9 +116,13 @@ architecture_model:
       endpoint:
         host: 203.0.113.10
         port: 51820
+      hub_member:
+        host: hub01
+        platform: linux
       peers:
         edge01:
           host: edge01
+          platform: openwrt
           address: 198.51.100.2/32
           lan_cidr: 192.0.2.0/24
 ```
