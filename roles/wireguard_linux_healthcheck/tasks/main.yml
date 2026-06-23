@@ -45,6 +45,7 @@
   loop: "{{ wireguard_linux_expected_peers }}"
   loop_control:
     label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
+  no_log: true
 
 - name: Validate Linux WireGuard latest handshakes
   ansible.builtin.assert:
@@ -80,3 +81,4 @@
   loop_control:
     label: "{{ item.host | default(item.public_key | default('unknown-peer')) }}"
   when: wireguard_linux_healthcheck_handshake_enabled | bool
+  no_log: true

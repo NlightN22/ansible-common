@@ -62,6 +62,7 @@
   register: mikrotik_wireguard_peer_health
   changed_when: false
   failed_when: mikrotik_wireguard_peer_health.stdout | default([]) | join('\n') is search('(?i)(syntax error|failure:|expected command name)')
+  no_log: true
 
 - name: Validate MikroTik WireGuard peers
   ansible.builtin.assert:
@@ -76,6 +77,7 @@
   loop: "{{ mikrotik_wireguard_peer_health.results | default([]) }}"
   loop_control:
     label: "{{ item.item.host | default(item.item.public_key | default('unknown-peer')) }}"
+  no_log: true
 
 - name: Check MikroTik spoke routes to selected WireGuard network
   community.routeros.command:
