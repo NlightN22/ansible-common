@@ -77,13 +77,12 @@
     $serviceName = "WireGuardTunnel`$$tunnelName"
     $configPath = '{{ wireguard_windows_staged_config }}'
     $wireGuard = (Get-Command wireguard.exe -ErrorAction Stop).Source
-    $existingServices = @(Get-Service -Name 'WireGuardTunnel$*' -ErrorAction SilentlyContinue)
+    $existingServices = @(Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
     foreach ($service in $existingServices) {
       if ($service.Status -ne 'Stopped') {
         Stop-Service -Name $service.Name -Force -ErrorAction Stop
       }
-      $existingTunnelName = $service.Name -replace '^WireGuardTunnel\$', ''
-      & $wireGuard /uninstalltunnelservice $existingTunnelName | Out-String
+      & $wireGuard /uninstalltunnelservice $tunnelName | Out-String
     }
     $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($service) {
