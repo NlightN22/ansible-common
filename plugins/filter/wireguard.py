@@ -29,14 +29,11 @@ def _dedupe_strings(values: list[Any]) -> list[str]:
 
 def wireguard_peer_allowed_ips(member: dict[str, Any], inherited_allowed_ips: list[str] | None = None) -> list[str]:
     member = _as_mapping(member, "member")
-    member_allowed_ips = list(member.get("allowed_ips", []) or [])
-    if inherited_allowed_ips is not None and member_allowed_ips == inherited_allowed_ips:
-        member_allowed_ips = []
     return _dedupe_strings(
         (
             [member.get("address")]
             + ([member.get("lan_cidr")] if member.get("lan_cidr") else [])
-            + member_allowed_ips
+            + list(member.get("allowed_ips", []) or [])
             + list(member.get("extra_allowed_ips", []) or [])
         )
     )

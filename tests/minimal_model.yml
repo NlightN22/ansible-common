@@ -15,9 +15,6 @@ architecture_model:
       hub_member:
         host: hub01
         platform: linux
-      defaults:
-        allowed_ips:
-          - 198.51.100.1/32
       peers:
         edge01:
           host: edge01

@@ -104,9 +104,6 @@ def _mapping_from_peer_list(peers: Any) -> dict[str, Any]:
 
 def _wireguard_peer_defaults(source: dict[str, Any]) -> dict[str, Any]:
     defaults = {}
-    hub = source.get("hub")
-    if isinstance(hub, dict) and hub.get("allowed_ips") is not None:
-        defaults["allowed_ips"] = deepcopy(hub["allowed_ips"])
     if source.get("interface_name") is not None:
         defaults["interface_name"] = deepcopy(source["interface_name"])
     return defaults
