@@ -91,7 +91,7 @@ and peer member with one of `openwrt`, `linux`, `mikrotik`, or `windows`.
 host metadata fallback, but consumer models should not duplicate network
 membership only to provide platform data.
 
-WireGuard OpenWrt apply operations require `endpoint.host`, `endpoint.port`, `interface_name`, `network_cidr`, `hub_allowed_ips`, each managed member `address`, `private_key`, and a hub public key exposed as `hub_public_key` or `hub_member.public_key`. Hub members also require `listen_port`.
+WireGuard OpenWrt apply operations require `endpoint.host`, `interface_name`, `network_cidr`, `hub_allowed_ips`, each managed member `address`, `private_key`, and a hub public key exposed as `hub_public_key` or `hub_member.public_key`. `endpoint.port` defaults to `listen_port` when omitted. Hub members also require `listen_port`.
 
 ## WireGuard Star Example
 
@@ -113,9 +113,9 @@ architecture_model:
       hub_address: 198.51.100.1/32
       hub_allowed_ips:
         - 198.51.100.1/32
+      listen_port: 51820
       endpoint:
         host: 203.0.113.10
-        port: 51820
       hub_member:
         host: hub01
         platform: linux

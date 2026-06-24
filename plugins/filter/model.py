@@ -273,7 +273,12 @@ def architecture_wireguard_view(
     view["members"] = _deep_merge({str(view.get("hub")): hub_member}, active_peers)
     view["hub_allowed_ips"] = view.get("hub_allowed_ips", source.get("hub_allowed_ips", []))
     view["interface_name"] = view.get("interface_name", source.get("interface_name"))
-    view["endpoint"] = view.get("endpoint", source.get("endpoint", {}))
+    endpoint = view.get("endpoint", source.get("endpoint", {}))
+    if not isinstance(endpoint, dict):
+        endpoint = {}
+    if endpoint.get("port") is None:
+        endpoint["port"] = view.get("listen_port", source.get("listen_port"))
+    view["endpoint"] = endpoint
     view["network_cidr"] = view.get("network_cidr", source.get("network_cidr"))
     view["preferred_transport"] = view.get("preferred_transport", source.get("preferred_transport", {}))
     view["hub_host"] = view.get("hub_host", view.get("hub"))

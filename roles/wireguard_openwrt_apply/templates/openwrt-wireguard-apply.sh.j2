@@ -244,6 +244,13 @@ uci set "firewall.allow_wg_${site_id}_wan.target=ACCEPT"
 
 uci commit firewall
 
+if [ "$host_role" != hub ]; then
+  live_endpoint="$(wg show "$interface_name" 2>/dev/null | sed -n 's/^  endpoint: //p' | head -n 1 || true)"
+  if [ "$live_endpoint" != "${endpoint_host}:${endpoint_port}" ]; then
+    network_changed=true
+  fi
+fi
+
 after_network="$(checksum_file /etc/config/network)"
 after_firewall="$(checksum_file /etc/config/firewall)"
 
