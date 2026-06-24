@@ -26,6 +26,18 @@
     set +e
     rc=0
     now="$(date +%s)"
+    ping_with_retry() {
+      target="$1"
+      attempt=1
+      while [ "$attempt" -le 6 ]; do
+        if ping -c 3 "$target"; then
+          return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 5
+      done
+      return 1
+    }
     check_uci_value() {
       key="$1"
       expected="$2"
@@ -49,7 +61,7 @@
     {% if wireguard_openwrt_healthcheck_extended_ping_enabled | bool %}
     {% for address in wireguard_openwrt_health_ping_addresses %}
     echo '### ping {{ address }}'
-    ping -c 3 {{ address }} || rc=1
+    ping_with_retry {{ address }} || rc=1
     {% endfor %}
     {% endif %}
     echo '### endpoint route uci'

@@ -46,12 +46,17 @@ def _host_member(site: dict[str, Any], host: str) -> dict[str, Any] | None:
     hub = site.get("hub")
     if isinstance(hub, dict) and hub.get("host") == host:
         return _deep_merge({"role": "hub"}, hub)
-    if site.get("hub_host") == host:
-        return _deep_merge({"role": "hub", "host": host}, hub if isinstance(hub, dict) else {})
     for spoke in site.get("spokes", []) or []:
         if isinstance(spoke, dict) and spoke.get("host") == host:
             return _deep_merge({"role": "spoke"}, spoke)
     return None
+
+
+def _hub_host(site: dict[str, Any]) -> str:
+    hub = site.get("hub")
+    if isinstance(hub, dict) and isinstance(hub.get("host"), str):
+        return hub["host"]
+    return ""
 
 
 def _member_allowed_ips(member: dict[str, Any], inherited_allowed_ips: list[str] | None = None) -> list[str]:
@@ -66,6 +71,13 @@ def _member_allowed_ips(member: dict[str, Any], inherited_allowed_ips: list[str]
     return [value for value in dict.fromkeys(values) if isinstance(value, str) and value]
 
 
+def _hub_allowed_ips(site: dict[str, Any]) -> list[str]:
+    hub = site.get("hub")
+    if isinstance(hub, dict) and hub.get("allowed_ips") is not None:
+        return list(hub.get("allowed_ips", []) or [])
+    return []
+
+
 def _add_wireguard_state(state: dict[str, list[dict[str, Any]]], site: dict[str, Any], host: str) -> None:
     member = _host_member(site, host)
     if not member or not member.get("active", True) or member.get("platform", "openwrt") != "openwrt":
@@ -75,7 +87,7 @@ def _add_wireguard_state(state: dict[str, list[dict[str, Any]]], site: dict[str,
         return
     site_id = site.get("id", "wireguard")
     source = f"wireguard:{site_id}"
-    hub_allowed_ips = list(site.get("hub_allowed_ips", []) or [])
+    hub_allowed_ips = _hub_allowed_ips(site)
     if member.get("role", "spoke") == "hub":
         for peer in site.get("spokes", []) or []:
             if not isinstance(peer, dict) or not peer.get("active", True):
@@ -159,7 +171,7 @@ def openwrt_route_control_wireguard_cidr_violations(fragments: Any) -> list[dict
             violations.append(
                 {
                     "site_id": site.get("id", "unknown"),
-                    "hub_host": site.get("hub_host", ""),
+                    "hub_host": _hub_host(site),
                     "network_cidr": network_cidr,
                     "offending_members": offending_members,
                 }

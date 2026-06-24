@@ -16,7 +16,7 @@
       }}
     wireguard_hub_private_key: "{{ wireguard_windows_hub_private_key }}"
     wireguard_hub_public_key: "{{ wireguard_windows_hub_public_key }}"
-    wireguard_windows_staged_config: "{{ wireguard_windows_staging_dir }}\\{{ resolved_wireguard_network.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}.conf"
+    wireguard_windows_staged_config: "{{ wireguard_windows_staging_dir }}\\{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}.conf"
 
 - name: Validate Windows hub WireGuard model
   ansible.builtin.assert:
@@ -27,8 +27,8 @@
       - resolved_wireguard_network.listen_port | int > 0
       - resolved_wireguard_network.active_peers | length > 0
       - resolved_wireguard_network.active_peers | dict2items | map(attribute='value.public_key') | select('defined') | list | length == resolved_wireguard_network.active_peers | length
-      - resolved_wireguard_network.windows_backup_dir is defined
-      - resolved_wireguard_network.windows_config_dir is defined
+      - resolved_wireguard_network.hub_member.windows_backup_dir is defined
+      - resolved_wireguard_network.hub_member.windows_config_dir is defined
     fail_msg: "Windows hub WireGuard model is incomplete."
 
 - name: Ensure Windows WireGuard staging and backup directories exist
@@ -37,7 +37,7 @@
     state: directory
   loop:
     - "{{ wireguard_windows_staging_dir }}"
-    - "{{ resolved_wireguard_network.windows_backup_dir }}"
+    - "{{ resolved_wireguard_network.hub_member.windows_backup_dir }}"
 
 - name: Save local WireGuard config backup on Windows
   become: true
@@ -45,8 +45,8 @@
   become_user: System
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
-    $backupRoot = '{{ resolved_wireguard_network.windows_backup_dir }}'
-    $configRoot = '{{ resolved_wireguard_network.windows_config_dir }}'
+    $backupRoot = '{{ resolved_wireguard_network.hub_member.windows_backup_dir }}'
+    $configRoot = '{{ resolved_wireguard_network.hub_member.windows_config_dir }}'
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $backupPath = Join-Path $backupRoot $stamp
     New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
@@ -73,7 +73,7 @@
   become_user: System
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
-    $tunnelName = '{{ resolved_wireguard_network.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}'
+    $tunnelName = '{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}'
     $serviceName = "WireGuardTunnel`$$tunnelName"
     $configPath = '{{ wireguard_windows_staged_config }}'
     $wireGuard = (Get-Command wireguard.exe -ErrorAction Stop).Source
@@ -103,7 +103,7 @@
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
     $ruleName = 'ansible-common-{{ resolved_wireguard_network.id }}-wireguard-icmpv4'
-    $remoteAddress = '{{ resolved_wireguard_network.spoke_address_pool }}'
+    $remoteAddress = '{{ resolved_wireguard_network.network_cidr }}'
     Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue |
       Remove-NetFirewallRule
     New-NetFirewallRule `
@@ -115,7 +115,7 @@
       -RemoteAddress $remoteAddress | Out-Null
   register: windows_wireguard_firewall
   changed_when: true
-  when: resolved_wireguard_network.spoke_address_pool is defined
+  when: resolved_wireguard_network.network_cidr is defined
 
 - name: Enable weak host behavior for Windows WireGuard interface
   become: true
@@ -124,7 +124,7 @@
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
     Set-NetIPInterface `
-      -InterfaceAlias '{{ resolved_wireguard_network.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}' `
+      -InterfaceAlias '{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}' `
       -AddressFamily IPv4 `
       -WeakHostReceive Enabled `
       -WeakHostSend Enabled

@@ -5,7 +5,7 @@
 PrivateKey = {{ wireguard_hub_private_key }}
 Address = {{ wireguard_site.hub_address }}
 ListenPort = {{ wireguard_site.listen_port }}
-{% for command in wireguard_site.post_up | default([]) %}
+{% for command in wireguard_site.hub.post_up | default([]) %}
 PostUp = {{ command }}
 {% endfor %}
 

@@ -178,13 +178,25 @@
 - name: Check WireGuard routes and connectivity
   ansible.builtin.raw: |
     set -eu
+    ping_with_retry() {
+      target="$1"
+      attempt=1
+      while [ "$attempt" -le 6 ]; do
+        if ping -c 3 "$target"; then
+          return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 5
+      done
+      return 1
+    }
     for attempt in 1 2 3 4 5 6; do
       wg show {{ resolved_wireguard_network.interface_name }} >/dev/null 2>&1 && break
       sleep 5
     done
     wg show {{ resolved_wireguard_network.interface_name }}
     {% for address in wireguard_openwrt_verify_ping_addresses %}
-    ping -c 3 {{ address }}
+    ping_with_retry {{ address }}
     {% endfor %}
     ip route get {{ resolved_wireguard_network.endpoint.host }}
     {% for address in wireguard_openwrt_verify_addresses %}

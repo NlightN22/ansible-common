@@ -42,6 +42,13 @@ def wireguard_peer_allowed_ips(member: dict[str, Any], inherited_allowed_ips: li
     )
 
 
+def _hub_allowed_ips(network: dict[str, Any]) -> list[str]:
+    hub = network.get("hub")
+    if isinstance(hub, dict) and hub.get("allowed_ips") is not None:
+        return list(hub.get("allowed_ips", []) or [])
+    return []
+
+
 def _peer_contract(
     member: dict[str, Any],
     allowed_ips: list[str] | None = None,
@@ -59,7 +66,7 @@ def _peer_contract(
 def wireguard_expected_peers(network: dict[str, Any]) -> list[dict[str, Any]]:
     network = _as_mapping(network, "network")
     current_member = _as_mapping(network.get("current_member"), "network.current_member")
-    hub_allowed_ips = list(network.get("hub_allowed_ips", []) or [])
+    hub_allowed_ips = _hub_allowed_ips(network)
     if current_member.get("role", "spoke") == "hub":
         active_peers = network.get("active_peers", {})
         if not isinstance(active_peers, dict):

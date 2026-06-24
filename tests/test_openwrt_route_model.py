@@ -26,7 +26,11 @@ class OpenWrtRouteModelTests(unittest.TestCase):
 
     def test_reports_hub_outside_network_cidr(self) -> None:
         fragment = yaml.safe_load(FIXTURE_PATH.read_text())
-        fragment["wireguard_site"]["hub"] = {"host": "hub01", "address": "198.51.101.1/32"}
+        fragment["wireguard_site"]["hub"] = {
+            "host": "hub01",
+            "address": "198.51.101.1/32",
+            "allowed_ips": ["198.51.101.1/32"],
+        }
 
         result = self.module.openwrt_route_control_wireguard_cidr_violations([fragment])
 
@@ -74,7 +78,11 @@ class OpenWrtRouteModelTests(unittest.TestCase):
 
     def test_accepts_members_inside_network_cidr(self) -> None:
         fragment = yaml.safe_load(FIXTURE_PATH.read_text())
-        fragment["wireguard_site"]["hub"] = {"host": "hub01", "address": "198.51.100.1/32"}
+        fragment["wireguard_site"]["hub"] = {
+            "host": "hub01",
+            "address": "198.51.100.1/32",
+            "allowed_ips": ["198.51.100.1/32"],
+        }
         fragment["wireguard_site"]["spokes"][0]["address"] = "198.51.100.2/32"
 
         result = self.module.openwrt_route_control_wireguard_cidr_violations([fragment])

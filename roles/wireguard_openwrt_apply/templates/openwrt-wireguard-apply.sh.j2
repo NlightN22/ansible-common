@@ -31,6 +31,19 @@ checksum_file() {
   fi
 }
 
+ping_with_retry() {
+  target="$1"
+  attempt=1
+  while [ "$attempt" -le 6 ]; do
+    if ping -c 3 "$target"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+  done
+  return 1
+}
+
 before_network="$(checksum_file /etc/config/network)"
 before_firewall="$(checksum_file /etc/config/firewall)"
 
@@ -134,6 +147,7 @@ uci -q delete "network.${interface_name}.addresses" || true
 uci add_list "network.${interface_name}.addresses=${spoke_address}"
 
 {% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
+delete_named_sections_by_prefix network "${site_id}_wg_hub_route_"
 while IFS='|' read -r peer_host peer_public_key peer_allowed_ips; do
   [ -n "$peer_host" ] || continue
   peer_section="$(find_wireguard_peer_section "$peer_host" "$peer_public_key" | head -n 1)"
@@ -175,6 +189,7 @@ uci -q delete "network.${endpoint_route_section}.disabled" || true
 {% endif %}
 
 {% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
+{% if not (openwrt_wireguard_apply_member.role | default('spoke') == 'hub' and openwrt_wireguard_apply_member.lan_cidr is defined and allowed_ip == openwrt_wireguard_apply_member.lan_cidr) %}
 uci set "network.${site_id}_wg_hub_route_{{ loop.index }}=route"
 uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.interface=${interface_name}"
 uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.target={{ allowed_ip | regex_replace('/32$', '') }}"
@@ -187,6 +202,7 @@ uci set "network.${site_id}_wg_hub_route_{{ loop.index }}.netmask=255.255.254.0"
 {% else %}
 echo "Unsupported route prefix in {{ allowed_ip }}" >&2
 exit 1
+{% endif %}
 {% endif %}
 {% endfor %}
 {% endif %}

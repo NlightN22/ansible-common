@@ -14,7 +14,7 @@
 
 - name: Select Windows WireGuard expected runtime contract
   ansible.builtin.set_fact:
-    wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}"
+    wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}"
     wireguard_windows_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
 
 - name: Check Windows WireGuard tunnel service and runtime

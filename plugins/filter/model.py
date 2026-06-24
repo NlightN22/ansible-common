@@ -34,7 +34,6 @@ IP_FIELD_NAMES = {
 }
 IP_LIST_FIELD_NAMES = {
     "allowed_ips",
-    "hub_allowed_ips",
     "routes",
 }
 
@@ -105,8 +104,9 @@ def _mapping_from_peer_list(peers: Any) -> dict[str, Any]:
 
 def _wireguard_peer_defaults(source: dict[str, Any]) -> dict[str, Any]:
     defaults = {}
-    if source.get("hub_allowed_ips") is not None:
-        defaults["allowed_ips"] = deepcopy(source["hub_allowed_ips"])
+    hub = source.get("hub")
+    if isinstance(hub, dict) and hub.get("allowed_ips") is not None:
+        defaults["allowed_ips"] = deepcopy(hub["allowed_ips"])
     if source.get("interface_name") is not None:
         defaults["interface_name"] = deepcopy(source["interface_name"])
     return defaults
@@ -120,11 +120,11 @@ def _add_star_network(
 ) -> None:
     network_id = str(source.get(id_field) or source.get("name") or network_type)
     source_hub = source.get("hub")
-    hub = source.get("hub_host")
-    if not hub and isinstance(source_hub, dict):
-        hub = source_hub.get("host")
-    if not hub and isinstance(source_hub, str):
-        hub = source_hub
+    if not isinstance(source_hub, dict):
+        raise AnsibleFilterError(f"{network_type} network {network_id!r} must define hub as a mapping")
+    hub = source_hub.get("host")
+    if not isinstance(hub, str) or not hub:
+        raise AnsibleFilterError(f"{network_type} network {network_id!r} must define hub.host")
     peers = {}
     for group_name in ("spokes", "sites", "clients", "peers"):
         peers.update(_mapping_from_peer_list(source.get(group_name)))
@@ -207,12 +207,12 @@ def architecture_is_hub(network: dict[str, Any], node_id: str) -> bool:
 
 def _network_hub_member(network: dict[str, Any]) -> dict[str, Any]:
     canonical_hub_member = network.get("hub_member")
+    source = network.get("source", {})
+    source_hub = source.get("hub") if isinstance(source, dict) else None
     if isinstance(canonical_hub_member, dict):
         return _deep_merge({"role": "hub", "host": network.get("hub")}, canonical_hub_member)
-    source = network.get("source", {})
-    hub_member = source.get("hub") if isinstance(source, dict) else None
-    if isinstance(hub_member, dict):
-        return _deep_merge({"role": "hub", "host": network.get("hub")}, hub_member)
+    if isinstance(source_hub, dict):
+        return _deep_merge({"role": "hub", "host": network.get("hub")}, source_hub)
     return {"role": "hub", "host": network.get("hub")}
 
 
@@ -271,7 +271,8 @@ def architecture_wireguard_view(
     view["peers"] = peers
     view["active_peers"] = active_peers
     view["members"] = _deep_merge({str(view.get("hub")): hub_member}, active_peers)
-    view["hub_allowed_ips"] = view.get("hub_allowed_ips", source.get("hub_allowed_ips", []))
+    view["hub_address"] = hub_member.get("address")
+    view["hub_allowed_ips"] = list(hub_member.get("allowed_ips", []) or [])
     view["interface_name"] = view.get("interface_name", source.get("interface_name"))
     endpoint = view.get("endpoint", source.get("endpoint", {}))
     if not isinstance(endpoint, dict):
@@ -282,7 +283,11 @@ def architecture_wireguard_view(
     view["network_cidr"] = view.get("network_cidr", source.get("network_cidr"))
     view["preferred_transport"] = view.get("preferred_transport", source.get("preferred_transport", {}))
     view["hub_host"] = view.get("hub_host", view.get("hub"))
-    view["hub_public_key"] = view.get("hub_public_key", hub_member.get("public_key"))
+    view["hub_public_key"] = hub_member.get("public_key")
+    view["post_up"] = list(hub_member.get("post_up", []) or [])
+    view["windows_tunnel_name"] = hub_member.get("windows_tunnel_name", view.get("interface_name"))
+    view["windows_backup_dir"] = hub_member.get("windows_backup_dir")
+    view["windows_config_dir"] = hub_member.get("windows_config_dir")
     node_data = model.get("nodes", {})
     if isinstance(node_data, dict) and isinstance(view.get("hub"), str) and isinstance(node_data.get(view["hub"]), dict):
         view["hub_member"] = _deep_merge(view["hub_member"], node_data[view["hub"]])
