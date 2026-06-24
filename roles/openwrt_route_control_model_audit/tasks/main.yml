@@ -1,0 +1,41 @@
+---
+- name: Initialize OpenWrt route control model fragments
+  ansible.builtin.set_fact:
+    openwrt_route_control_loaded_model_fragments: "{{ openwrt_route_control_model_fragments }}"
+
+- name: Load OpenWrt route control model files
+  ansible.builtin.include_vars:
+    file: "{{ openwrt_route_control_model_file }}"
+    name: openwrt_route_control_loaded_model_fragment
+  loop: "{{ openwrt_route_control_model_files }}"
+  loop_control:
+    loop_var: openwrt_route_control_model_file
+    label: "{{ openwrt_route_control_model_file }}"
+  register: openwrt_route_control_loaded_model_file_results
+  when: openwrt_route_control_model_files | length > 0
+
+- name: Collect OpenWrt route control model fragments
+  ansible.builtin.set_fact:
+    openwrt_route_control_loaded_model_fragments: >-
+      {{
+        openwrt_route_control_loaded_model_fragments
+        + [openwrt_route_control_loaded_model_file_result.ansible_facts.openwrt_route_control_loaded_model_fragment]
+      }}
+  loop: "{{ openwrt_route_control_loaded_model_file_results.results | default([]) }}"
+  loop_control:
+    loop_var: openwrt_route_control_loaded_model_file_result
+    label: "{{ openwrt_route_control_loaded_model_file_result.ansible_included_var_files | default([]) | first | default('fragment') }}"
+  when: openwrt_route_control_model_files | length > 0
+
+- name: Build OpenWrt WireGuard model audit report
+  ansible.builtin.set_fact:
+    openwrt_route_control_wireguard_model_violations: >-
+      {{
+        openwrt_route_control_loaded_model_fragments
+        | ansible_common.core.openwrt_route_control_wireguard_cidr_violations
+      }}
+
+- name: Show OpenWrt WireGuard model audit report
+  ansible.builtin.debug:
+    msg:
+      violations: "{{ openwrt_route_control_wireguard_model_violations }}"

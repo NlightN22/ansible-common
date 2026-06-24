@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from ipaddress import ip_address, ip_network
 from typing import Any
 
 from ansible.errors import AnsibleFilterError
@@ -104,6 +105,68 @@ def _three_x_ui_client(star: dict[str, Any], host: str) -> dict[str, Any] | None
     return None
 
 
+def _address_in_cidr(address: Any, cidr: Any) -> bool:
+    if not isinstance(address, str) or not address or not isinstance(cidr, str) or not cidr:
+        return False
+    try:
+        return ip_address(address.split("/", 1)[0]) in ip_network(cidr, strict=False)
+    except ValueError:
+        return False
+
+
+def openwrt_route_control_wireguard_cidr_violations(fragments: Any) -> list[dict[str, Any]]:
+    violations: list[dict[str, Any]] = []
+    for fragment in _as_list(fragments):
+        if not isinstance(fragment, dict):
+            continue
+        site = fragment.get("wireguard_site")
+        if not isinstance(site, dict):
+            continue
+        network_cidr = site.get("network_cidr")
+        if not isinstance(network_cidr, str) or not network_cidr:
+            continue
+
+        offending_members: list[dict[str, Any]] = []
+        hub = site.get("hub")
+        if isinstance(hub, dict):
+            hub_address = hub.get("address")
+            if isinstance(hub_address, str) and hub_address and not _address_in_cidr(hub_address, network_cidr):
+                offending_members.append(
+                    {
+                        "member_host": hub.get("host", ""),
+                        "member_role": "hub",
+                        "address": hub_address,
+                    }
+                )
+
+        for spoke in site.get("spokes", []) or []:
+            if not isinstance(spoke, dict):
+                continue
+            address = spoke.get("address")
+            if not isinstance(address, str) or not address:
+                continue
+            if _address_in_cidr(address, network_cidr):
+                continue
+            offending_members.append(
+                {
+                    "member_host": spoke.get("host", ""),
+                    "member_role": "spoke",
+                    "address": address,
+                }
+            )
+
+        if offending_members:
+            violations.append(
+                {
+                    "site_id": site.get("id", "unknown"),
+                    "hub_host": site.get("hub_host", ""),
+                    "network_cidr": network_cidr,
+                    "offending_members": offending_members,
+                }
+            )
+    return violations
+
+
 def _add_three_x_ui_state(state: dict[str, list[dict[str, Any]]], star: dict[str, Any], host: str) -> None:
     client = _three_x_ui_client(star, host)
     if not client:
@@ -150,4 +213,7 @@ def openwrt_route_control_declared_state(fragments: Any, host: str) -> dict[str,
 
 class FilterModule:
     def filters(self):
-        return {"openwrt_route_control_declared_state": openwrt_route_control_declared_state}
+        return {
+            "openwrt_route_control_declared_state": openwrt_route_control_declared_state,
+            "openwrt_route_control_wireguard_cidr_violations": openwrt_route_control_wireguard_cidr_violations,
+        }
