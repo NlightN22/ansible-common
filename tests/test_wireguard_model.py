@@ -62,6 +62,17 @@ class WireGuardModelTests(unittest.TestCase):
 
         self.assertEqual(peers[0]["allowed_ips"], ["198.51.100.2/32"])
 
+    def test_wireguard_expected_peers_keep_hub_allowed_ips_on_spoke_views(self) -> None:
+        fragment = yaml.safe_load(FIXTURE_PATH.read_text())
+        fragment["wireguard_site"]["hub"]["allowed_ips"] = ["198.51.100.1/32"]
+
+        normalized = self.module.architecture_model_from_fragments([fragment])
+        normalized = self.module.architecture_normalize(normalized)
+        resolved = self.module.architecture_wireguard_view(normalized, "example_wg", "edge01")
+        peers = self.wireguard_module.wireguard_expected_peers(resolved)
+
+        self.assertEqual(peers[0]["allowed_ips"], ["198.51.100.1/32"])
+
 
 if __name__ == "__main__":
     unittest.main()

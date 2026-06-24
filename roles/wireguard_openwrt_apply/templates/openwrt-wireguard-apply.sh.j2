@@ -16,6 +16,7 @@ endpoint_route_section='{{ openwrt_wireguard_apply_transport.route.section }}'
 {% endif %}
 host_role='{{ openwrt_wireguard_apply_member.role | default("spoke") }}'
 wireguard_network_cidr='{{ openwrt_wireguard_apply_site.network_cidr }}'
+expected_hub_allowed_ips='{{ openwrt_wireguard_apply_site.hub_allowed_ips | join(",") }}'
 network_changed=false
 firewall_changed=false
 
@@ -261,6 +262,10 @@ uci set "firewall.allow_wg_${site_id}_wan.target=ACCEPT"
 uci commit firewall
 
 if [ "$host_role" != hub ]; then
+  live_peer_allowed_ips="$(wg show "$interface_name" dump 2>/dev/null | awk -F '\t' -v key="$hub_public_key" '$1 == key { print $4; exit }' || true)"
+  if [ "$live_peer_allowed_ips" != "$expected_hub_allowed_ips" ]; then
+    network_changed=true
+  fi
   live_endpoint="$(wg show "$interface_name" 2>/dev/null | sed -n 's/^  endpoint: //p' | head -n 1 || true)"
   if [ "$live_endpoint" != "${endpoint_host}:${endpoint_port}" ]; then
     network_changed=true

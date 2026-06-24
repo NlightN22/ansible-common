@@ -40,6 +40,14 @@ def wireguard_peer_allowed_ips(member: dict[str, Any], inherited_allowed_ips: li
 
 
 def _hub_allowed_ips(network: dict[str, Any]) -> list[str]:
+    hub_allowed_ips = network.get("hub_allowed_ips")
+    if isinstance(hub_allowed_ips, list):
+        return list(hub_allowed_ips or [])
+
+    hub_member = network.get("hub_member")
+    if isinstance(hub_member, dict) and hub_member.get("allowed_ips") is not None:
+        return list(hub_member.get("allowed_ips", []) or [])
+
     hub = network.get("hub")
     if isinstance(hub, dict) and hub.get("allowed_ips") is not None:
         return list(hub.get("allowed_ips", []) or [])

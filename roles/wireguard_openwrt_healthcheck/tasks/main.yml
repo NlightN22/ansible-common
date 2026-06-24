@@ -125,7 +125,9 @@
     that:
       - "'### interface' in wireguard_openwrt_health.stdout"
       - "'### dump' in wireguard_openwrt_health.stdout"
-      - resolved_wireguard_network.is_hub | bool or 'dev ' ~ resolved_wireguard_network.interface_name in wireguard_openwrt_health.stdout
+      - >-
+        resolved_wireguard_network.is_hub | bool
+        or wireguard_openwrt_health.stdout is search('(?m)^\\s*[0-9]+: ' ~ (resolved_wireguard_network.interface_name | regex_escape()) ~ ':')
       - resolved_wireguard_network.is_hub | bool or resolved_wireguard_network.endpoint.host in wireguard_openwrt_health.stdout
     fail_msg: "WireGuard OpenWrt healthcheck failed on {{ inventory_hostname }}."
 

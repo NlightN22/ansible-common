@@ -115,20 +115,24 @@
   changed_when: "'changed=true' in wireguard_openwrt_apply_result.stdout"
   no_log: "{{ wireguard_openwrt_apply_hide_log | bool }}"
 
-- name: Restart OpenWrt network after WireGuard configuration changes
+- name: Bounce OpenWrt WireGuard interface after configuration changes
   ansible.builtin.raw: |
-    (
+    bounce_script="/tmp/ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-bounce.sh"
+    cat > "$bounce_script" <<'__ANSIBLE_WIREGUARD_BOUNCE__'
+    #!/bin/sh
       sleep 1
-      /etc/init.d/network reload || /etc/init.d/network restart
       ifdown {{ openwrt_wireguard_apply_member.interface_name | default(openwrt_wireguard_apply_site.interface_name) }} >/dev/null 2>&1 || true
+      sleep 3
       ifup {{ openwrt_wireguard_apply_member.interface_name | default(openwrt_wireguard_apply_site.interface_name) }}
-    ) >/tmp/ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-network-reload.log 2>&1 &
+    __ANSIBLE_WIREGUARD_BOUNCE__
+    chmod 0700 "$bounce_script"
+    start-stop-daemon -S -b -x "$bounce_script" -- "$bounce_script" >/tmp/ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-network-bounce.log 2>&1
   changed_when: true
   when:
     - wireguard_openwrt_apply_restart_network | bool
     - "'network_changed=true' in wireguard_openwrt_apply_result.stdout"
 
-- name: Wait for OpenWrt SSH after WireGuard network reload
+- name: Wait for OpenWrt SSH after WireGuard interface bounce
   ansible.builtin.wait_for:
     host: "{{ ansible_host | default(inventory_hostname) }}"
     port: "{{ ansible_port | default(22) }}"
