@@ -63,16 +63,16 @@ Version 1 supports these topology names:
 - `mesh`;
 - `point_to_point`.
 
-## Raw Fragment Compatibility
+## Raw Fragments
 
-The loader accepts either canonical `architecture_model` files or known raw model fragments and converts them into the canonical root object:
+The loader accepts raw model fragments and converts them into the canonical root object:
 
 - `wireguard_site` becomes a `networks` entry with `type: wireguard`.
 - `xp2p_star` becomes a `networks` entry with `type: xp2p`.
 - `three_x_ui_star` becomes a `networks` entry with `type: xray_overlay`.
 - `ad_replication_topology` becomes a `directory_topologies` entry and is also exposed through the deprecated `domain_controllers` compatibility alias.
 
-This compatibility layer is for loading existing environment models without copying those models into common.
+Raw fragments are normalized into `architecture_model` so roles can consume a consistent contract.
 
 ## Extension Rules
 
@@ -82,7 +82,7 @@ Unknown `extensions` keys must be preserved during normalization. Common roles m
 
 Normalization publishes a stable `resolved_architecture` object. Version 1 preserves extensions, keeps the raw source under converted network entries, converts peer lists into peer maps, and applies network-level `defaults` followed by peer-level `overrides`.
 
-When `network_id` selects a WireGuard network, normalization also publishes `resolved_wireguard_network` for the current host. This capability view contains the normalized network data, `hub_member`, `members`, `active_peers`, `current_member`, and `is_hub`. Reusable WireGuard playbooks and roles should consume this resolved view instead of reading legacy `wireguard_site` directly.
+When `network_id` selects a WireGuard network, normalization also publishes `resolved_wireguard_network` for the current host. This capability view contains the normalized network data, `hub_member`, `members`, `active_peers`, `current_member`, and `is_hub`. Reusable WireGuard playbooks and roles should consume this resolved view instead of reading raw fragment fields directly.
 
 Model-level WireGuard operations dispatch per member platform. The platform is
 part of the network member contract and must be declared on each WireGuard hub
