@@ -31,6 +31,9 @@
   ansible.builtin.raw: |
     service_path='{{ wireguard_endpoint_failover_service_path | default("/etc/init.d/wg-" ~ resolved_wireguard_network.id ~ "-endpoint-failover") }}'
     script_path='{{ wireguard_endpoint_failover_script_path | default("/usr/local/sbin/wg-" ~ resolved_wireguard_network.id ~ "-endpoint-failover") }}'
+    endpoint_host='{{ resolved_wireguard_network.endpoint.host }}'
+    endpoint_route_section='{{ resolved_wireguard_network.effective_transport.route.section | default("") }}'
+    endpoint_host_plain="${endpoint_host%/32}"
     changed=false
     if [ -e "$service_path" ]; then
       if [ -x "$service_path" ]; then
@@ -44,6 +47,19 @@
       rm -f "$script_path"
       changed=true
     fi
+    for section in $(uci -q show network | sed -n "s/^\\([^=]*\\)=route$/\\1/p"); do
+      target="$(uci -q get "${section}.target" 2>/dev/null || true)"
+      if [ "$target" = "$endpoint_host" ] || [ "$target" = "$endpoint_host_plain" ] || [ "${section#network.}" = "$endpoint_route_section" ]; then
+        uci -q delete "$section" || true
+        changed=true
+      fi
+    done
+    ip route del "${endpoint_host}/32" >/dev/null 2>&1 || true
+    ip route del "$endpoint_host" >/dev/null 2>&1 || true
+    ip route del "$endpoint_host_plain/32" >/dev/null 2>&1 || true
+    ip route del "$endpoint_host_plain" >/dev/null 2>&1 || true
+    uci commit network >/dev/null 2>&1 || true
+    /etc/init.d/network reload >/dev/null 2>&1 || true
     echo "changed=$changed"
   register: wireguard_apply_stale_endpoint_failover_cleanup
   changed_when: "'changed=true' in wireguard_apply_stale_endpoint_failover_cleanup.stdout"
