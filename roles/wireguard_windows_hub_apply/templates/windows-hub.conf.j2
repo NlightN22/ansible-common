@@ -1,5 +1,5 @@
 # Managed by Ansible. Source: {{ template_path | default('templates/wireguard/windows-hub.conf.j2') }}
-# Network: {{ network_display_name | default(wireguard_site_id) }}
+# Network: {{ network_display_name | default(wireguard_site.id | default('unknown')) }}
 
 [Interface]
 PrivateKey = {{ wireguard_hub_private_key }}
