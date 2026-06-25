@@ -9,10 +9,13 @@ spoke_private_key='{{ openwrt_wireguard_apply_member.private_key }}'
 hub_public_key='{{ wireguard_hub_public_key }}'
 endpoint_host='{{ openwrt_wireguard_apply_site.endpoint.host }}'
 endpoint_port='{{ openwrt_wireguard_apply_site.endpoint.port }}'
-{% set endpoint_route_managed = openwrt_wireguard_apply_transport.interface is defined and openwrt_wireguard_apply_transport.route is defined and openwrt_wireguard_apply_transport.route.section is defined %}
+{% set endpoint_route_section_defined = openwrt_wireguard_apply_transport.route is defined and openwrt_wireguard_apply_transport.route.section is defined %}
+{% set endpoint_route_managed = openwrt_wireguard_apply_transport.type | default('public') == 'xp2p' and openwrt_wireguard_apply_transport.interface is defined and endpoint_route_section_defined %}
+{% if endpoint_route_section_defined %}
+endpoint_route_section='{{ openwrt_wireguard_apply_transport.route.section }}'
+{% endif %}
 {% if endpoint_route_managed %}
 endpoint_route_interface='{{ openwrt_wireguard_apply_transport.interface }}'
-endpoint_route_section='{{ openwrt_wireguard_apply_transport.route.section }}'
 {% endif %}
 host_role='{{ openwrt_wireguard_apply_member.role | default("spoke") }}'
 {% set effective_member_lan_cidr = openwrt_wireguard_apply_member.lan_cidr | default(hostvars[inventory_hostname].site_lan_cidr | default('')) %}
@@ -130,7 +133,7 @@ else
     done
 fi
 
-{% if endpoint_route_managed %}
+{% if endpoint_route_section_defined %}
 delete_named_section network "$endpoint_route_section"
 {% endif %}
 {% if openwrt_wireguard_apply_member.role | default('spoke') != 'hub' %}

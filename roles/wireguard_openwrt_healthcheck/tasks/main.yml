@@ -71,7 +71,7 @@
     {% endif %}
     echo '### endpoint route uci'
     {% if not (resolved_wireguard_network.is_hub | bool) %}
-    {% if resolved_wireguard_network.effective_transport.interface is defined and resolved_wireguard_network.effective_transport.route is defined and resolved_wireguard_network.effective_transport.route.section is defined %}
+    {% if resolved_wireguard_network.effective_transport.type | default('public') == 'xp2p' and resolved_wireguard_network.effective_transport.interface is defined and resolved_wireguard_network.effective_transport.route is defined and resolved_wireguard_network.effective_transport.route.section is defined %}
     check_uci_value network.{{ resolved_wireguard_network.effective_transport.route.section }} route
     check_uci_value network.{{ resolved_wireguard_network.effective_transport.route.section }}.interface {{ resolved_wireguard_network.effective_transport.interface }}
     check_uci_value network.{{ resolved_wireguard_network.effective_transport.route.section }}.target {{ resolved_wireguard_network.endpoint.host }}
