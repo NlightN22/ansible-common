@@ -15,6 +15,7 @@ endpoint_route_interface='{{ openwrt_wireguard_apply_transport.interface }}'
 endpoint_route_section='{{ openwrt_wireguard_apply_transport.route.section }}'
 {% endif %}
 host_role='{{ openwrt_wireguard_apply_member.role | default("spoke") }}'
+{% set effective_member_lan_cidr = openwrt_wireguard_apply_member.lan_cidr | default(hostvars[inventory_hostname].site_lan_cidr | default('')) %}
 wireguard_network_cidr='{{ openwrt_wireguard_apply_site.network_cidr }}'
 expected_hub_allowed_ips='{{ openwrt_wireguard_apply_site.hub_allowed_ips | join(",") }}'
 network_changed=false
@@ -241,7 +242,7 @@ uci set "firewall.allow_wg_${site_id}_icmp.src=$interface_name"
 uci set "firewall.allow_wg_${site_id}_icmp.proto=icmp"
 uci set "firewall.allow_wg_${site_id}_icmp.target=ACCEPT"
 
-{% if openwrt_wireguard_apply_member.lan_cidr is defined %}
+{% if effective_member_lan_cidr | length > 0 %}
 uci set "firewall.wg_${site_id}_to_lan_masq=nat"
 uci set "firewall.wg_${site_id}_to_lan_masq.name=${interface_name}-to-lan-masquerade"
 uci set "firewall.wg_${site_id}_to_lan_masq.family=ipv4"

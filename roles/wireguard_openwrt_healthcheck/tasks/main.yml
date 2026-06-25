@@ -20,6 +20,11 @@
     wireguard_openwrt_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
     wireguard_openwrt_health_ping_addresses: >-
       {{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}
+    wireguard_openwrt_effective_member_lan_cidr: >-
+      {{
+        resolved_wireguard_network.current_member.lan_cidr
+        | default(hostvars[inventory_hostname].site_lan_cidr | default(''))
+      }}
 
 - name: Check OpenWrt WireGuard and route state
   ansible.builtin.raw: |
@@ -105,7 +110,7 @@
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}.name {{ resolved_wireguard_network.interface_name }}
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}.input ACCEPT
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}.output ACCEPT
-    {% if resolved_wireguard_network.current_member.lan_cidr is defined %}
+    {% if wireguard_openwrt_effective_member_lan_cidr | length > 0 %}
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq nat
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.name {{ resolved_wireguard_network.interface_name }}-to-lan-masquerade
     check_uci_value firewall.wg_{{ resolved_wireguard_network.id }}_to_lan_masq.family ipv4
