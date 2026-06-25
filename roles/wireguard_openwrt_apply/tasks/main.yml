@@ -32,7 +32,7 @@
 - name: Validate WireGuard OpenWrt transport settings
   ansible.builtin.assert:
     that:
-      - resolved_wireguard_network.effective_transport.type | default('public') in ['public', 'direct', 'xp2p']
+      - resolved_wireguard_network.effective_transport.type | default('public') in ['public', 'xp2p']
       - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.star is defined
       - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.interface is defined
       - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.outbound_tag is defined

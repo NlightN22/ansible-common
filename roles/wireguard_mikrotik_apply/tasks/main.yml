@@ -81,7 +81,7 @@
       - mikrotik_wireguard_site.endpoint.host is defined
       - mikrotik_wireguard_site.endpoint.port | int > 0
       - mikrotik_wireguard_site.hub_allowed_ips | length > 0
-      - mikrotik_wireguard_preferred_transport.type | default('public') in ['public', 'direct']
+      - mikrotik_wireguard_preferred_transport.type | default('public') == 'public'
       - mikrotik_wireguard_safe_mode_effective_enabled | bool or mikrotik_wireguard_unsafe_apply_without_safe_mode_effective | bool
       - not mikrotik_wireguard_is_hub | bool or mikrotik_wireguard_site.listen_port | int > 0
     fail_msg: "WireGuard model {{ mikrotik_wireguard_site_id }} is incomplete for MikroTik host {{ inventory_hostname }}."
