@@ -10,12 +10,39 @@ transport_interface='{{ openwrt_wireguard_failover_transport_interface }}'
 transport_tag='{{ openwrt_wireguard_failover_transport_tag }}'
 route_section='{{ openwrt_wireguard_failover_route_section }}'
 switch_delay_seconds='{{ openwrt_wireguard_failover_switch_delay_seconds | int }}'
+restore_switch_delay_seconds='{{ openwrt_wireguard_failover_restore_switch_delay_seconds | int }}'
 disable_route_when_dead='{{ openwrt_wireguard_failover_disable_route_when_dead | bool | lower }}'
 restore_route_when_alive='{{ openwrt_wireguard_failover_restore_route_when_alive | bool | lower }}'
 
 log() {
   logger -t "$log_tag" "$*"
   printf '%s\n' "$*"
+}
+
+public_default_route_get() {
+  ip -4 route get 1.1.1.1 2>/dev/null | head -n 1
+}
+
+apply_public_fallback_route() {
+  route_line="$(public_default_route_get)"
+  [ -n "$route_line" ] || return 1
+
+  fallback_gateway="$(printf '%s\n' "$route_line" | sed -n 's/.* via \([^ ]*\) dev .*/\1/p')"
+  fallback_dev="$(printf '%s\n' "$route_line" | sed -n 's/.* dev \([^ ]*\).*/\1/p')"
+
+  [ -n "$fallback_dev" ] || return 1
+  [ "$fallback_dev" != "$transport_interface" ] || return 1
+
+  if [ -n "$fallback_gateway" ]; then
+    ip route replace "${endpoint_host}/32" via "$fallback_gateway" dev "$fallback_dev"
+  else
+    ip route replace "${endpoint_host}/32" dev "$fallback_dev"
+  fi
+}
+
+delete_endpoint_route() {
+  ip route del "${endpoint_host}/32" >/dev/null 2>&1 || true
+  ip route del "$endpoint_host" >/dev/null 2>&1 || true
 }
 
 route_disabled() {
@@ -71,6 +98,12 @@ disable_route() {
     /etc/init.d/network reload
     ip route del "${endpoint_host}/32" dev "$transport_interface" >/dev/null 2>&1 || true
     ip route del "$endpoint_host" dev "$transport_interface" >/dev/null 2>&1 || true
+    if apply_public_fallback_route; then
+      log "installed explicit public fallback route for ${endpoint_host}"
+    else
+      log "failed to install explicit public fallback route for ${endpoint_host}"
+      return 1
+    fi
     return 0
   fi
 
@@ -80,15 +113,22 @@ disable_route() {
   /etc/init.d/network reload
   ip route del "${endpoint_host}/32" dev "$transport_interface" >/dev/null 2>&1 || true
   ip route del "$endpoint_host" dev "$transport_interface" >/dev/null 2>&1 || true
-  log "disabled route ${route_section} for ${endpoint_host}:${endpoint_port}; endpoint should use public fallback"
+  if apply_public_fallback_route; then
+    log "disabled route ${route_section} for ${endpoint_host}:${endpoint_port}; endpoint should use explicit public fallback"
+  else
+    log "failed to install explicit public fallback route for ${endpoint_host}:${endpoint_port}"
+    return 1
+  fi
 }
 
 enable_route() {
   if ! route_disabled; then
     log "route ${route_section} already enabled for ${endpoint_host}"
+    delete_endpoint_route
     return 0
   fi
 
+  delete_endpoint_route
   uci -q delete "network.${route_section}.disabled" || true
   uci commit network
   /etc/init.d/network reload
@@ -102,8 +142,8 @@ if transport_alive; then
   fi
 
   if route_disabled; then
-    log "transport ${transport_tag} is alive; waiting ${switch_delay_seconds}s before route restore"
-    sleep "$switch_delay_seconds"
+    log "transport ${transport_tag} is alive; waiting ${restore_switch_delay_seconds}s before route restore"
+    sleep "$restore_switch_delay_seconds"
     if transport_alive; then
       enable_route
     else

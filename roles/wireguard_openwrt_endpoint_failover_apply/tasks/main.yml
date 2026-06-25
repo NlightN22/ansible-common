@@ -12,6 +12,11 @@
     openwrt_wireguard_failover_disable_route_when_dead: "{{ resolved_wireguard_network.effective_transport.failover.disable_route_when_dead | default(true) }}"
     openwrt_wireguard_failover_restore_route_when_alive: "{{ resolved_wireguard_network.effective_transport.failover.restore_route_when_alive | default(true) }}"
     openwrt_wireguard_failover_switch_delay_seconds: "{{ resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | default(30) }}"
+    openwrt_wireguard_failover_restore_switch_delay_seconds: >-
+      {{
+        resolved_wireguard_network.effective_transport.failover.restore_switch_delay_seconds
+        | default(resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | default(30))
+      }}
     openwrt_wireguard_failover_instance_name: "{{ wireguard_endpoint_failover_instance_name }}"
     openwrt_wireguard_failover_script_path: "{{ wireguard_endpoint_failover_script_path }}"
     openwrt_wireguard_failover_service_path: "{{ wireguard_endpoint_failover_service_path }}"
@@ -30,6 +35,7 @@
       - openwrt_wireguard_failover_route_section | length > 0
       - openwrt_wireguard_failover_enabled | bool
       - openwrt_wireguard_failover_switch_delay_seconds | int >= 30
+      - openwrt_wireguard_failover_restore_switch_delay_seconds | int >= openwrt_wireguard_failover_switch_delay_seconds | int
       - openwrt_wireguard_failover_instance_name | length > 0
       - openwrt_wireguard_failover_script_path | length > 0
       - openwrt_wireguard_failover_service_path | length > 0
