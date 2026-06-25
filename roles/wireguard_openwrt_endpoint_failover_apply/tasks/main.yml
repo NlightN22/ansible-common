@@ -90,3 +90,8 @@
     {{ openwrt_wireguard_failover_service_path }} restart
   changed_when: true
   when: wireguard_endpoint_failover_service_enabled | bool
+
+- name: Run WireGuard endpoint failover script once after service restart
+  ansible.builtin.raw: "{{ openwrt_wireguard_failover_script_path }}"
+  changed_when: false
+  when: wireguard_endpoint_failover_service_enabled | bool

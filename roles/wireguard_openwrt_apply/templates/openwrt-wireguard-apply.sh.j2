@@ -72,13 +72,6 @@ delete_route_target() {
     done
 }
 
-delete_kernel_route_target() {
-  route_target="$1"
-
-  ip route del "${route_target}/32" >/dev/null 2>&1 || true
-  ip route del "$route_target" >/dev/null 2>&1 || true
-}
-
 delete_named_sections_by_prefix() {
   config="$1"
   prefix="$2"
@@ -155,12 +148,10 @@ fi
 
 {% if endpoint_route_section_defined %}
 delete_route_target "$endpoint_host"
-delete_kernel_route_target "$endpoint_host"
 delete_named_section network "$endpoint_route_section"
 {% endif %}
 {% for allowed_ip in openwrt_wireguard_apply_site.hub_allowed_ips %}
 delete_route_target "{{ allowed_ip }}"
-delete_kernel_route_target "{{ allowed_ip | regex_replace('/32$', '') }}"
 {% endfor %}
 {% if openwrt_wireguard_apply_member.role | default('spoke') != 'hub' %}
 delete_named_sections_by_prefix network "${site_id}_wg_hub_route_"
@@ -181,7 +172,6 @@ uci add_list "network.${interface_name}.addresses=${spoke_address}"
 delete_named_sections_by_prefix network "${site_id}_wg_hub_route_"
 {% for peer in openwrt_wireguard_site_members if peer.host != openwrt_wireguard_apply_site.hub_host and (peer.active | default(true)) and peer.lan_cidr is defined %}
 delete_route_target "{{ peer.lan_cidr }}"
-delete_kernel_route_target "{{ peer.lan_cidr | regex_replace('/32$', '') }}"
 {% endfor %}
 while IFS='|' read -r peer_host peer_public_key peer_allowed_ips; do
   [ -n "$peer_host" ] || continue

@@ -99,21 +99,51 @@
     openwrt_wireguard_apply_script: "{{ lookup('ansible.builtin.template', 'openwrt-wireguard-apply.sh.j2') }}"
   no_log: "{{ wireguard_openwrt_apply_hide_log | bool }}"
 
-- name: Install WireGuard OpenWrt apply script
-  ansible.builtin.raw: |
-    umask 077
-    cat > /tmp/ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-apply.sh <<'__ANSIBLE_WIREGUARD__'
-    {{ openwrt_wireguard_apply_script }}
-    __ANSIBLE_WIREGUARD__
-    chmod 0700 /tmp/ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-apply.sh
-  changed_when: false
+- name: Create local temporary WireGuard OpenWrt apply script file
+  ansible.builtin.tempfile:
+    state: file
+    prefix: ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-
+    suffix: -apply.sh
+  register: openwrt_wireguard_apply_script_file
+  delegate_to: localhost
+  no_log: "{{ wireguard_openwrt_apply_hide_log | bool }}"
+
+- name: Write local temporary WireGuard OpenWrt apply script file
+  ansible.builtin.copy:
+    content: "{{ openwrt_wireguard_apply_script }}"
+    dest: "{{ openwrt_wireguard_apply_script_file.path }}"
+    mode: '0600'
+  delegate_to: localhost
   no_log: "{{ wireguard_openwrt_apply_hide_log | bool }}"
 
 - name: Apply WireGuard OpenWrt configuration
-  ansible.builtin.raw: /tmp/ansible-wireguard-{{ openwrt_wireguard_apply_site_id }}-apply.sh
+  ansible.builtin.script: "{{ openwrt_wireguard_apply_script_file.path }}"
   register: wireguard_openwrt_apply_result
   changed_when: "'changed=true' in wireguard_openwrt_apply_result.stdout"
   no_log: "{{ wireguard_openwrt_apply_hide_log | bool }}"
+
+- name: Remove local temporary WireGuard OpenWrt apply script file
+  ansible.builtin.file:
+    path: "{{ openwrt_wireguard_apply_script_file.path }}"
+    state: absent
+  delegate_to: localhost
+  changed_when: false
+  no_log: "{{ wireguard_openwrt_apply_hide_log | bool }}"
+
+- name: Detect missing WireGuard hub routes after OpenWrt apply
+  ansible.builtin.raw: |
+    missing=false
+    {% for address in resolved_wireguard_network.hub_allowed_ips | map('regex_replace', '/.*$', '') %}
+    route_get="$(ip route get {{ address }} 2>/dev/null || true)"
+    if ! printf '%s\n' "$route_get" | grep -q "dev {{ resolved_wireguard_network.interface_name }}"; then
+      missing=true
+    fi
+    {% endfor %}
+    echo "missing=$missing"
+  register: wireguard_openwrt_route_repair_check
+  changed_when: "'missing=true' in wireguard_openwrt_route_repair_check.stdout"
+  when:
+    - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
 
 - name: Bounce OpenWrt WireGuard interface after configuration changes
   ansible.builtin.raw: |
@@ -130,7 +160,9 @@
   changed_when: true
   when:
     - wireguard_openwrt_apply_restart_network | bool
-    - "'network_changed=true' in wireguard_openwrt_apply_result.stdout"
+    - >-
+      'network_changed=true' in wireguard_openwrt_apply_result.stdout
+      or (wireguard_openwrt_route_repair_check is defined and wireguard_openwrt_route_repair_check is changed)
 
 - name: Wait for OpenWrt SSH after WireGuard interface bounce
   ansible.builtin.wait_for:
@@ -143,7 +175,9 @@
   when:
     - wireguard_openwrt_apply_restart_network | bool
     - wireguard_openwrt_apply_wait_for_ssh_after_network_reload | bool
-    - "'network_changed=true' in wireguard_openwrt_apply_result.stdout"
+    - >-
+      'network_changed=true' in wireguard_openwrt_apply_result.stdout
+      or (wireguard_openwrt_route_repair_check is defined and wireguard_openwrt_route_repair_check is changed)
 
 - name: Restart OpenWrt firewall after WireGuard firewall changes
   ansible.builtin.raw: /etc/init.d/firewall restart
@@ -221,7 +255,11 @@
 - name: Validate endpoint route does not go through WireGuard
   ansible.builtin.assert:
     that:
-      - resolved_wireguard_network.is_hub | bool or resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or 'dev ' ~ resolved_wireguard_network.effective_transport.interface in wireguard_openwrt_verify.stdout
+      - >-
+        resolved_wireguard_network.is_hub | bool
+        or resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p'
+        or resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool
+        or 'dev ' ~ resolved_wireguard_network.effective_transport.interface in wireguard_openwrt_verify.stdout
       - resolved_wireguard_network.is_hub | bool or 'dev ' ~ resolved_wireguard_network.interface_name in wireguard_openwrt_verify.stdout
     fail_msg: "WireGuard route validation failed on {{ inventory_hostname }}."
   when:

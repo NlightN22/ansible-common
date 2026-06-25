@@ -23,6 +23,15 @@ public_default_route_get() {
   ip -4 route get 1.1.1.1 2>/dev/null | head -n 1
 }
 
+endpoint_route_get() {
+  ip -4 route get "$endpoint_host" 2>/dev/null | head -n 1
+}
+
+endpoint_route_uses_transport_interface() {
+  route_line="$(endpoint_route_get)"
+  printf '%s\n' "$route_line" | grep -q "dev $transport_interface"
+}
+
 apply_public_fallback_route() {
   route_line="$(public_default_route_get)"
   [ -n "$route_line" ] || return 1
@@ -43,6 +52,24 @@ apply_public_fallback_route() {
 delete_endpoint_route() {
   ip route del "${endpoint_host}/32" >/dev/null 2>&1 || true
   ip route del "$endpoint_host" >/dev/null 2>&1 || true
+}
+
+restore_transport_route() {
+  if endpoint_route_uses_transport_interface; then
+    return 0
+  fi
+
+  delete_endpoint_route
+  /etc/init.d/network reload
+  if endpoint_route_uses_transport_interface; then
+    return 0
+  fi
+
+  ifdown "$transport_interface" >/dev/null 2>&1 || true
+  sleep 1
+  ifup "$transport_interface" >/dev/null 2>&1 || true
+  sleep 3
+  endpoint_route_uses_transport_interface
 }
 
 route_disabled() {
@@ -150,7 +177,12 @@ if transport_alive; then
       log "transport ${transport_tag} changed state during restore delay; leaving route unchanged"
     fi
   else
-    log "transport ${transport_tag} is alive and route ${route_section} is enabled"
+    if restore_transport_route; then
+      log "transport ${transport_tag} is alive and route ${route_section} is enabled"
+    else
+      log "transport ${transport_tag} is alive but failed to restore route ${route_section} on ${transport_interface}"
+      exit 1
+    fi
   fi
   exit 0
 fi
