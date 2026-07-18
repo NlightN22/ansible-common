@@ -101,13 +101,21 @@ def _add_wireguard_state(state: dict[str, list[dict[str, Any]]], site: dict[str,
     transport = member.get("preferred_transport", site.get("preferred_transport", {})) or {}
     route = transport.get("route", {}) if isinstance(transport, dict) else {}
     if isinstance(route, dict) and transport.get("interface") and site.get("endpoint", {}).get("host"):
-        state["excluded_routes"].append(
-            {
-                "target": site["endpoint"]["host"],
-                "interface": transport["interface"],
-                "source": f"{source}:endpoint",
-            }
-        )
+        endpoint_route = {
+            "target": site["endpoint"]["host"],
+            "source": f"{source}:endpoint",
+        }
+        if route.get("section"):
+            endpoint_route["section"] = route["section"]
+        if route.get("table"):
+            endpoint_route["table"] = route["table"]
+        if route.get("metric"):
+            endpoint_route["metric"] = route["metric"]
+        if transport.get("interface_role"):
+            endpoint_route["interface_role"] = transport["interface_role"]
+        else:
+            endpoint_route["interface"] = transport["interface"]
+        state["excluded_routes"].append(endpoint_route)
 
 
 def _three_x_ui_client(star: dict[str, Any], host: str) -> dict[str, Any] | None:

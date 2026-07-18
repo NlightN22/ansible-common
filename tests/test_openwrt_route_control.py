@@ -58,6 +58,51 @@ class OpenWrtRouteControlTests(unittest.TestCase):
             [{"target": "10.50.10.0/24", "via": "", "dev": "wg0", "table": "main", "metric": "", "proto": "", "scope": ""}],
         )
 
+    def test_excluded_wan_role_route_matches_concrete_underlay_device(self) -> None:
+        result = self.module.openwrt_route_control_plan(
+            route_stdout="45.137.190.126 via 91.219.98.129 dev eth1 proto static",
+            rule_stdout="",
+            uci_stdout="",
+            excluded_routes=[
+                {
+                    "target": "45.137.190.126/32",
+                    "interface_role": "wan",
+                    "source": "wireguard:term:endpoint",
+                }
+            ],
+        )
+
+        self.assertEqual(result["extra_routes"], [])
+
+    def test_excluded_wan_role_route_does_not_match_tunnel_device(self) -> None:
+        result = self.module.openwrt_route_control_plan(
+            route_stdout="45.137.190.126 dev wg_term proto static",
+            rule_stdout="",
+            uci_stdout="",
+            excluded_routes=[
+                {
+                    "target": "45.137.190.126/32",
+                    "interface_role": "wan",
+                    "source": "wireguard:term:endpoint",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            result["extra_routes"],
+            [
+                {
+                    "target": "45.137.190.126",
+                    "via": "",
+                    "dev": "wg_term",
+                    "table": "main",
+                    "metric": "",
+                    "proto": "static",
+                    "scope": "",
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

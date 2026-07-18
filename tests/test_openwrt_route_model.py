@@ -89,6 +89,41 @@ class OpenWrtRouteModelTests(unittest.TestCase):
 
         self.assertEqual(result, [])
 
+    def test_wireguard_endpoint_route_intent_can_use_interface_role(self) -> None:
+        fragment = yaml.safe_load(FIXTURE_PATH.read_text())
+        fragment["wireguard_site"].update(
+            {
+                "id": "term",
+                "interface_name": "wg_term",
+                "endpoint": {"host": "203.0.113.10"},
+                "preferred_transport": {
+                    "type": "public",
+                    "interface": "wan",
+                    "interface_role": "wan",
+                    "route": {"section": "term_wg_endpoint_route"},
+                },
+            }
+        )
+        fragment["wireguard_site"]["spokes"][0].update(
+            {
+                "host": "edge01",
+                "platform": "openwrt",
+                "active": True,
+            }
+        )
+
+        result = self.module.openwrt_route_control_declared_state([fragment], "edge01")
+
+        self.assertIn(
+            {
+                "target": "203.0.113.10",
+                "source": "wireguard:term:endpoint",
+                "section": "term_wg_endpoint_route",
+                "interface_role": "wan",
+            },
+            result["excluded_routes"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

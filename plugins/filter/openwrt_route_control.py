@@ -77,7 +77,7 @@ def _canonical_route(route: dict[str, Any]) -> dict[str, str]:
         "table": _table(route.get("table")),
         "metric": _clean(route.get("metric")),
     }
-    for field in ("source", "section", "owner"):
+    for field in ("source", "section", "owner", "interface_role", "via_role", "purpose", "drift_policy"):
         if route.get(field):
             canonical[field] = _clean(route[field])
     return canonical
@@ -272,6 +272,31 @@ def _is_external_uplink_interface(interface: str) -> bool:
     )
 
 
+def _is_underlay_route(route: dict[str, str]) -> bool:
+    return bool(route["via"]) or _is_external_uplink_interface(route["dev"])
+
+
+def _route_matches_intent(route: dict[str, str], intent: dict[str, str]) -> bool:
+    if route["target"] != intent["target"] or route["table"] != intent["table"] or route["metric"] != intent["metric"]:
+        return False
+    if intent["via"] and route["via"] != intent["via"]:
+        return False
+    if intent["dev"] and route["dev"] != intent["dev"]:
+        return False
+
+    interface_role = intent.get("interface_role", "")
+    if interface_role in {"wan", "underlay", "external"}:
+        return _is_underlay_route(route)
+    if interface_role:
+        return False
+
+    return True
+
+
+def _route_matches_any_intent(route: dict[str, str], intents: list[dict[str, str]]) -> bool:
+    return any(_route_matches_intent(route, intent) for intent in intents)
+
+
 def _is_safe_extra_rule(rule: dict[str, str]) -> bool:
     return rule["priority"] not in SYSTEM_RULE_PRIORITIES
 
@@ -306,7 +331,7 @@ def openwrt_route_control_plan(
 ) -> dict[str, Any]:
     declared_route_items = [_canonical_route(item) for item in _items(declared_routes, "declared_routes")]
     declared_rule_items = [_canonical_rule(item) for item in _items(declared_rules, "declared_rules")]
-    excluded_route_keys = {_route_key(_canonical_route(item)) for item in _items(excluded_routes, "excluded_routes")}
+    excluded_route_items = [_canonical_route(item) for item in _items(excluded_routes, "excluded_routes")]
     excluded_rule_keys = {_rule_key(_canonical_rule(item)) for item in _items(excluded_rules, "excluded_rules")}
 
     runtime_routes = [_parse_route_line(line) for line in route_stdout.splitlines()]
@@ -324,7 +349,7 @@ def openwrt_route_control_plan(
     extra_routes = [
         route for route in runtime_routes
         if _route_key(route) not in declared_route_keys
-        and _route_key(route) not in excluded_route_keys
+        and not _route_matches_any_intent(route, excluded_route_items)
         and _is_safe_extra_route(route)
     ]
     extra_rules = [
@@ -336,7 +361,7 @@ def openwrt_route_control_plan(
     extra_uci_routes = [
         route for route in uci_routes
         if _route_key(route) not in declared_route_keys
-        and _route_key(route) not in excluded_route_keys
+        and not _route_matches_any_intent(route, excluded_route_items)
         and _is_safe_extra_route(route)
     ]
     extra_uci_rules = [
