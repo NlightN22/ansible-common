@@ -40,7 +40,7 @@
     redirects_line='  redirects = [{% for redirect in xp2p_client_redirects %}{{ "" if loop.first else ", " }}{ cidr = "{{ redirect.cidr }}", domain = "{{ redirect.domain | default("") }}", no_routes = {{ redirect.no_routes | default(false) | bool | lower }}, outbound_tag = "{{ redirect.outbound_tag | default(xp2p_redirect_outbound_tag) }}" }{% endfor %}]'
 
     test -f "$config_path"
-    before="$(cksum "$config_path" | awk '{print $1 ":" $2}')"
+    before="$(md5sum "$config_path" | awk '{print $1}')"
     tmp_path="${config_path}.ansible.$$"
 
     awk -v redirects_line="$redirects_line" '
@@ -52,12 +52,15 @@
         }
         next
       }
-      { print }
-      END {
+      /^[[:space:]]*endpoints[[:space:]]*=/ {
+        print
         if (replaced == 0) {
-          exit 2
+          print redirects_line
+          replaced = 1
         }
+        next
       }
+      { print }
     ' "$config_path" > "$tmp_path"
 
     if cmp -s "$config_path" "$tmp_path"; then
@@ -68,7 +71,7 @@
 
     cat "$tmp_path" > "$config_path"
     rm -f "$tmp_path"
-    after="$(cksum "$config_path" | awk '{print $1 ":" $2}')"
+    after="$(md5sum "$config_path" | awk '{print $1}')"
 
     if [ "$before" != "$after" ]; then
       echo changed=true
