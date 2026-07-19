@@ -164,54 +164,48 @@
       - three_x_ui_hub_panel_inbounds.json.obj | length > 0
     fail_msg: "3x-ui/Xray healthcheck failed on {{ inventory_hostname }}."
 
-- name: Discover 3x-ui star model files for Xray reverse routing healthcheck
-  ansible.builtin.set_fact:
-    three_x_ui_hub_star_model_files: "{{ lookup('ansible.builtin.fileglob', inventory_env_dir ~ '/models/three_x_ui/*.yml', wantlist=True) }}"
-
 - name: Load candidate 3x-ui star models for Xray reverse routing healthcheck
   ansible.builtin.include_vars:
     file: "{{ item }}"
     name: three_x_ui_hub_candidate_model
   register: three_x_ui_hub_candidate_models
   loop: "{{ three_x_ui_hub_star_model_files }}"
-  when: three_x_ui_star_id is not defined
+  when: three_x_ui_hub_star_model_files | length > 0
 
 - name: Initialize matching 3x-ui star model list
   ansible.builtin.set_fact:
-    three_x_ui_hub_matching_star_models: []
-  when: three_x_ui_star_id is not defined
+    three_x_ui_hub_candidate_star_models: "{{ three_x_ui_hub_star_models }}"
 
-- name: Select matching 3x-ui star models for current hub
+- name: Add loaded candidate 3x-ui star models
   ansible.builtin.set_fact:
-    three_x_ui_hub_matching_star_models: >-
+    three_x_ui_hub_candidate_star_models: >-
       {{
-        three_x_ui_hub_matching_star_models
+        three_x_ui_hub_candidate_star_models
         + [item.ansible_facts.three_x_ui_hub_candidate_model.three_x_ui_star]
       }}
   loop: "{{ three_x_ui_hub_candidate_models.results | default([]) }}"
-  when:
-    - three_x_ui_star_id is not defined
-    - item.ansible_facts.three_x_ui_hub_candidate_model.three_x_ui_star.hub_host == inventory_hostname
   no_log: true
 
-- name: Load explicit 3x-ui star model for Xray reverse routing healthcheck
-  ansible.builtin.include_vars:
-    file: "{{ inventory_env_dir }}/models/three_x_ui/{{ three_x_ui_star_id }}.yml"
-    name: three_x_ui_hub_explicit_star_model
-  when: three_x_ui_star_id is defined
+- name: Select matching 3x-ui star models for current hub
+  ansible.builtin.set_fact:
+    three_x_ui_hub_healthcheck_star_models: >-
+      {{
+        three_x_ui_hub_candidate_star_models
+        | selectattr('hub_host', 'equalto', inventory_hostname)
+        | list
+      }}
+  when: three_x_ui_star_id is not defined
 
 - name: Select effective 3x-ui star models for Xray reverse routing healthcheck
   ansible.builtin.set_fact:
     three_x_ui_hub_healthcheck_star_models: >-
       {{
-        (
-          [three_x_ui_hub_explicit_star_model.three_x_ui_star]
-          if three_x_ui_hub_explicit_star_model.three_x_ui_star.hub_host == inventory_hostname
-          else []
-        )
-        if three_x_ui_star_id is defined
-        else (three_x_ui_hub_matching_star_models | default([]))
+        three_x_ui_hub_candidate_star_models
+        | selectattr('id', 'equalto', three_x_ui_star_id)
+        | selectattr('hub_host', 'equalto', inventory_hostname)
+        | list
       }}
+  when: three_x_ui_star_id is defined
 
 - name: Validate 3x-ui star model for Xray reverse routing healthcheck
   ansible.builtin.assert:

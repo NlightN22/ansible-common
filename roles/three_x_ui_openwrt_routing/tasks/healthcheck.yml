@@ -6,10 +6,9 @@
   ansible.builtin.set_fact:
     three_x_ui_openwrt_healthcheck_failures: []
 
-- name: Load generated management address observations for egress checks
-  ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../../inventory/prod/generated/management_addresses.yml"
-    name: management_generated_model
+- name: Select generated management address observations for egress checks
+  ansible.builtin.set_fact:
+    management_generated_model: "{{ three_x_ui_openwrt_routing_management_generated_model }}"
 
 - name: Check 3x-ui OpenWrt routing dat freshness
   community.openwrt.command:

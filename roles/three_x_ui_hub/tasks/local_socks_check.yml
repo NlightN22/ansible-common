@@ -47,11 +47,6 @@
       was not found on {{ inventory_hostname }}.
   when: three_x_ui_hub_local_socks.enabled | default(false) | bool
 
-- name: Load host management overrides for OpenWrt reverse probes
-  ansible.builtin.include_vars:
-    file: "{{ inventory_env_dir }}/models/hosts/management_overrides.yml"
-    name: three_x_ui_hub_management_model
-
 - name: Initialize effective 3x-ui hub reverse checks
   ansible.builtin.set_fact:
     three_x_ui_hub_effective_reverse_checks: "{{ three_x_ui_hub_star.hub_reverse_checks | default([]) }}"

@@ -55,3 +55,7 @@ three_x_ui_hub_local_socks:
     enabled: false
 three_x_ui_hub_local_socks_probe_timeout: 10
 three_x_ui_hub_openwrt_reverse_probe_require_explicit: false
+three_x_ui_hub_star_models: []
+three_x_ui_hub_star_model_files: []
+three_x_ui_hub_management_model:
+  management_overrides: {}

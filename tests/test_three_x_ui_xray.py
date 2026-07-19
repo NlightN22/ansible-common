@@ -63,8 +63,8 @@ def test_reconcile_is_idempotent_for_existing_inbound_and_route() -> None:
     module = load_module()
     route = {
         "type": "field",
-        "outboundTag": "ab-zavodskaya.rev",
-        "ip": ["172.16.16.0/23"],
+        "outboundTag": "edge-a.rev",
+        "ip": ["192.0.2.0/24"],
     }
     inbound = {
         "listen": "127.0.0.1",
@@ -75,7 +75,7 @@ def test_reconcile_is_idempotent_for_existing_inbound_and_route() -> None:
     }
     config = {
         "inbounds": [inbound.copy()],
-        "reverse": {"portals": [{"tag": "ab-zavodskaya.rev", "domain": "ab-zavodskaya.rev"}]},
+        "reverse": {"portals": [{"tag": "edge-a.rev", "domain": "edge-a.rev"}]},
         "routing": {"rules": [module.API_ROUTE, route.copy()]},
     }
 
@@ -83,7 +83,7 @@ def test_reconcile_is_idempotent_for_existing_inbound_and_route() -> None:
         config,
         {
             "inbounds": [inbound],
-            "reverse_portals": [{"tag": "ab-zavodskaya.rev", "domain": "ab-zavodskaya.rev"}],
+            "reverse_portals": [{"tag": "edge-a.rev", "domain": "edge-a.rev"}],
             "routes": [route],
         },
     )

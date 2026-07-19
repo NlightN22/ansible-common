@@ -67,7 +67,7 @@ class XP2PModelTests(unittest.TestCase):
                     "preferred_transport": {
                         "type": "xp2p",
                         "star": "relay-a",
-                        "routed_cidrs": ["91.219.98.150/32"],
+                        "routed_cidrs": ["203.0.113.150/32"],
                     },
                 },
                 "site-b": {
@@ -78,7 +78,7 @@ class XP2PModelTests(unittest.TestCase):
                     "preferred_transport": {
                         "type": "xp2p",
                         "star": "relay-a",
-                        "routed_cidrs": ["185.221.214.189/32"],
+                        "routed_cidrs": ["198.51.100.189/32"],
                     },
                 },
             },
@@ -89,22 +89,22 @@ class XP2PModelTests(unittest.TestCase):
 
         self.assertEqual(
             redirect_cidrs(view),
-            {"91.219.98.150/32", "185.221.214.189/32"},
+            {"203.0.113.150/32", "198.51.100.189/32"},
         )
 
     def test_wireguard_hub_does_not_route_own_public_endpoint_through_xp2p(self) -> None:
         view = self.module.architecture_xp2p_view(self.model, "relay-a", "edge-a")
 
-        self.assertEqual(redirect_cidrs(view), {"185.221.214.189/32"})
+        self.assertEqual(redirect_cidrs(view), {"198.51.100.189/32"})
 
     def test_server_reverse_redirect_points_wireguard_endpoint_to_hub_client(self) -> None:
         view = self.module.architecture_xp2p_view(self.model, "relay-a", "relay-a.example.test")
 
         redirects = server_redirects_by_cidr(view)
         self.assertEqual(
-            redirects["91.219.98.150/32"],
+            redirects["203.0.113.150/32"],
             {
-                "cidr": "91.219.98.150/32",
+                "cidr": "203.0.113.150/32",
                 "host": "relay-a-example-test",
                 "tag": "edge-arelay-a-example-test.rev",
             },
