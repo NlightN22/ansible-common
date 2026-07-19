@@ -107,9 +107,23 @@ def _server_host(source: dict[str, Any], hub: Any) -> Any:
     return source.get("server_host") or hub
 
 
+def _host_id(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, dict):
+        host = value.get("host")
+        if isinstance(host, str) and host:
+            return host
+        entity_id = _entity_id(value, "")
+        if entity_id:
+            return entity_id
+    return None
+
+
 def _derived_redirects(
     model: dict[str, Any],
     xp2p_network: dict[str, Any],
+    node_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     source = xp2p_network.get("source", {})
     if not isinstance(source, dict):
@@ -138,10 +152,12 @@ def _derived_redirects(
         routed_cidrs = preferred_transport.get("routed_cidrs", [])
         if not isinstance(routed_cidrs, list):
             continue
-        for cidr in routed_cidrs:
-            client_redirects.append({"cidr": cidr, "no_routes": True})
 
-        wg_hub = transport.get("hub") or transport.get("hub_host")
+        wg_hub = _host_id(transport.get("hub_host")) or _host_id(transport.get("hub"))
+        if node_id is None or node_id != wg_hub:
+            for cidr in routed_cidrs:
+                client_redirects.append({"cidr": cidr, "no_routes": True})
+
         hub_client = None
         for peer_id, peer in clients.items():
             if not isinstance(peer, dict):
@@ -201,7 +217,7 @@ def architecture_xp2p_view(
     if isinstance(server_host, str) and isinstance(node_data.get(server_host), dict):
         server_member = _deep_merge(server_member, node_data[server_host])
 
-    derived_redirects, derived_server_redirects = _derived_redirects(model, view)
+    derived_redirects, derived_server_redirects = _derived_redirects(model, view, node_id)
     managed_redirects = deepcopy(source.get("managed_redirects", view.get("managed_redirects", [])))
     managed_server_redirects = deepcopy(source.get("managed_server_redirects", view.get("managed_server_redirects", [])))
     if not isinstance(managed_redirects, list):

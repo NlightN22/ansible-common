@@ -93,6 +93,11 @@
     openwrt_wireguard_apply_member: "{{ resolved_wireguard_network.current_member }}"
     openwrt_wireguard_site_members: "{{ [resolved_wireguard_network.hub_member] + (resolved_wireguard_network.active_peers | dict2items | map(attribute='value') | list) }}"
     wireguard_hub_public_key: "{{ resolved_wireguard_network.hub_public_key }}"
+    wireguard_openwrt_verify_ping_source_address: >-
+      {{
+        resolved_wireguard_network.current_member.address
+        | regex_replace('/.*$', '')
+      }}
 
 - name: Build WireGuard OpenWrt apply script
   ansible.builtin.set_fact:
@@ -218,9 +223,10 @@
     set -eu
     ping_with_retry() {
       target="$1"
+      source="$2"
       attempt=1
       while [ "$attempt" -le 6 ]; do
-        if ping -c 3 "$target"; then
+        if ping -I "$source" -c 3 "$target"; then
           return 0
         fi
         attempt=$((attempt + 1))
@@ -234,7 +240,7 @@
     done
     wg show {{ resolved_wireguard_network.interface_name }}
     {% for address in wireguard_openwrt_verify_ping_addresses %}
-    ping_with_retry {{ address }}
+    ping_with_retry {{ address }} "{{ wireguard_openwrt_verify_ping_source_address }}"
     {% endfor %}
     ip route get {{ resolved_wireguard_network.endpoint.host }}
     {% for address in wireguard_openwrt_verify_addresses %}

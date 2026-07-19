@@ -15,6 +15,11 @@
   ansible.builtin.set_fact:
     wireguard_endpoint_failover_ping_addresses:
       - "{{ resolved_wireguard_network.hub_address | regex_replace('/.*$', '') }}"
+    wireguard_endpoint_failover_ping_source_address: >-
+      {{
+        resolved_wireguard_network.current_member.address
+        | regex_replace('/.*$', '')
+      }}
 
 - name: Collect endpoint transport failover state
   ansible.builtin.raw: |
@@ -56,6 +61,19 @@
       public_route_dev="$(printf '%s\n' "$public_route_get" | sed -n 's/.* dev \([^ ]*\).*/\1/p')"
       [ "$route_get_rc" -eq 0 ] || rc=1
       [ "$public_route_get_rc" -eq 0 ] || rc=1
+    }
+    ping_with_retry() {
+      target="$1"
+      source="$2"
+      attempt=1
+      while [ "$attempt" -le 6 ]; do
+        if ping -I "$source" -c 3 "$target"; then
+          return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 5
+      done
+      return 1
     }
     evaluate_route_expectation() {
       route_expectation=failed
@@ -102,7 +120,7 @@
     wg show || rc=1
     echo '### hub connectivity'
     {% for address in wireguard_endpoint_failover_ping_addresses %}
-    ping -c 3 {{ address }} || rc=1
+    ping_with_retry {{ address }} "{{ wireguard_endpoint_failover_ping_source_address }}" || rc=1
     {% endfor %}
     detect_xp2p_status
     evaluate_route_expectation
