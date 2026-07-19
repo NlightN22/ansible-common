@@ -32,6 +32,18 @@
   register: xp2p_server_redirects_before
   changed_when: false
 
+- name: Remove retired managed xp2p server redirects
+  ansible.builtin.raw: >-
+    xp2p server redirect remove
+    --cidr {{ item.cidr | quote }}
+    --tag {{ item.tag | quote }}
+    --host {{ item.host | quote }}
+    --quiet
+  loop: "{{ xp2p_server_redirect_network.retired_server_redirects | default([]) }}"
+  register: xp2p_server_redirect_remove
+  changed_when: true
+  when: item.cidr in xp2p_server_redirects_before.stdout
+
 - name: Add missing managed xp2p server redirects
   ansible.builtin.raw: >-
     xp2p server redirect add
@@ -57,3 +69,10 @@
       - item.host in xp2p_server_redirects_after.stdout
     fail_msg: "Managed XP2P server redirect {{ item.cidr }} is missing on {{ inventory_hostname }}."
   loop: "{{ xp2p_server_redirect_network.managed_server_redirects }}"
+
+- name: Validate retired xp2p server redirects are absent
+  ansible.builtin.assert:
+    that:
+      - item.cidr not in xp2p_server_redirects_after.stdout
+    fail_msg: "Retired XP2P server redirect {{ item.cidr }} is still present on {{ inventory_hostname }}."
+  loop: "{{ xp2p_server_redirect_network.retired_server_redirects | default([]) }}"
