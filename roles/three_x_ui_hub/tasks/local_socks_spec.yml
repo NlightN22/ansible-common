@@ -1,0 +1,20 @@
+---
+- name: Build 3x-ui hub local SOCKS inbound spec
+  ansible.builtin.set_fact:
+    three_x_ui_hub_local_socks_inbounds: >-
+      {{
+        [
+          {
+            'state': 'present',
+            'listen': three_x_ui_hub_local_socks.bind_host,
+            'port': three_x_ui_hub_local_socks.port | int,
+            'protocol': three_x_ui_hub_local_socks.protocol,
+            'tag': three_x_ui_hub_local_socks.tag,
+            'settings': three_x_ui_hub_local_socks.settings | default({'auth': 'noauth', 'udp': true}),
+            'sniffing': three_x_ui_hub_local_socks.sniffing | default({'enabled': false}),
+            'adopt_existing': three_x_ui_hub_local_socks.adopt_existing | default(false) | bool
+          }
+        ]
+        if three_x_ui_hub_local_socks.enabled | default(false) | bool
+        else []
+      }}

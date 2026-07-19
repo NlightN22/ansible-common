@@ -1,0 +1,243 @@
+---
+- name: Validate 3x-ui hub inventory model
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_platform == 'docker'
+      - three_x_ui_hub_control_plane == '3x-ui'
+      - three_x_ui_hub_proxy_core == 'xray-core'
+      - three_x_ui_hub_network_memberships | length > 0
+    fail_msg: "The 3x-ui hub inventory model is incomplete on {{ inventory_hostname }}."
+
+- name: Ensure 3x-ui hub diagnostic packages are installed
+  ansible.builtin.apt:
+    name: "{{ three_x_ui_hub_baseline_packages }}"
+    state: present
+    update_cache: true
+  when:
+    - three_x_ui_hub_repair_baseline_packages | bool
+    - ansible_facts.os_family | default('') == 'Debian'
+
+- name: Check required local commands
+  ansible.builtin.shell: "command -v {{ item | quote }}"
+  register: three_x_ui_hub_command_checks
+  changed_when: false
+  failed_when: false
+  loop: "{{ three_x_ui_hub_required_commands }}"
+
+- name: Build missing command list
+  ansible.builtin.set_fact:
+    three_x_ui_hub_missing_commands: >-
+      {{
+        three_x_ui_hub_command_checks.results
+        | selectattr('rc', 'ne', 0)
+        | map(attribute='item')
+        | list
+      }}
+
+- name: Validate required local commands
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_missing_commands | length == 0
+    fail_msg: "Missing required commands on {{ inventory_hostname }}: {{ three_x_ui_hub_missing_commands | join(', ') }}"
+
+- name: Check Docker daemon
+  ansible.builtin.command: docker info --format {% raw %}'{{ .ServerVersion }}'{% endraw %}
+  register: three_x_ui_hub_docker_info
+  changed_when: false
+
+- name: Find running 3x-ui containers
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker ps --format {% raw %}'{{ .Names }} {{ .Image }}'{% endraw %} |
+      grep -E -i '{{ three_x_ui_hub_container_name_patterns | join("|") }}'
+  args:
+    executable: /bin/bash
+  register: three_x_ui_hub_containers
+  changed_when: false
+  failed_when: false
+
+- name: Validate running 3x-ui container was found
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_containers.stdout_lines | length > 0
+    fail_msg: "No running 3x-ui container matching {{ three_x_ui_hub_container_name_patterns | join(', ') }} was found on {{ inventory_hostname }}."
+
+- name: Select primary 3x-ui container
+  ansible.builtin.set_fact:
+    three_x_ui_hub_primary_container: "{{ (three_x_ui_hub_containers.stdout_lines | first).split() | first }}"
+
+- name: Inspect primary 3x-ui container state
+  ansible.builtin.command: >-
+    docker inspect
+    --format {% raw %}'{{ .State.Status }} {{ .State.Restarting }} {{ .RestartCount }}'{% endraw %}
+    {{ three_x_ui_hub_primary_container }}
+  register: three_x_ui_hub_container_state
+  changed_when: false
+
+- name: Check xray process in primary 3x-ui container
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker top {{ three_x_ui_hub_primary_container | quote }} |
+      grep -E -i '{{ three_x_ui_hub_expected_process_patterns | join("|") }}'
+  args:
+    executable: /bin/bash
+  register: three_x_ui_hub_xray_process
+  changed_when: false
+  failed_when: false
+
+- name: Collect TCP listeners
+  ansible.builtin.command: ss -lntp
+  register: three_x_ui_hub_tcp_listeners
+  changed_when: false
+  failed_when: false
+
+- name: Check configured HTTP endpoints
+  ansible.builtin.command: "curl --fail --silent --show-error --max-time 10 {{ item }}"
+  register: three_x_ui_hub_url_checks
+  changed_when: false
+  loop: "{{ three_x_ui_hub_healthcheck_urls }}"
+  when: three_x_ui_hub_healthcheck_urls | length > 0
+
+- name: Validate 3x-ui panel API credentials are configured
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_panel_url | length > 0
+      - three_x_ui_hub_panel_username | default('') | length > 0
+      - three_x_ui_hub_panel_password | default('') | length > 0
+    fail_msg: "3x-ui panel API credentials or URL are not configured on {{ inventory_hostname }}."
+
+- name: Login to 3x-ui panel API
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      username: "{{ three_x_ui_hub_panel_username }}"
+      password: "{{ three_x_ui_hub_panel_password }}"
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_panel_login
+  changed_when: false
+  failed_when: false
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Validate 3x-ui panel API login
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_panel_login.status == 200
+      - three_x_ui_hub_panel_login.json.success | default(false) | bool
+      - three_x_ui_hub_panel_login.cookies_string | default('') | length > 0
+    fail_msg: >-
+      3x-ui panel API login failed on {{ inventory_hostname }}
+      at {{ three_x_ui_hub_panel_url }}/login
+      with HTTP status {{ three_x_ui_hub_panel_login.status | default('unknown') }}.
+
+- name: Collect 3x-ui inbound list through panel API
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/list"
+    method: GET
+    headers:
+      Cookie: "{{ three_x_ui_hub_panel_login.cookies_string }}"
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_panel_inbounds
+  changed_when: false
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Validate 3x-ui panel API inbound list
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_panel_inbounds.status == 200
+      - three_x_ui_hub_panel_inbounds.json.success | default(false) | bool
+      - three_x_ui_hub_panel_inbounds.json.obj is sequence
+    fail_msg: "3x-ui panel API inbound list check failed on {{ inventory_hostname }}."
+
+- name: Validate primary 3x-ui container is healthy enough
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_container_state.stdout is search('^running false ')
+      - three_x_ui_hub_xray_process.stdout | length > 0
+      - three_x_ui_hub_panel_inbounds.json.obj | length > 0
+    fail_msg: "3x-ui/Xray healthcheck failed on {{ inventory_hostname }}."
+
+- name: Discover 3x-ui star model files for Xray reverse routing healthcheck
+  ansible.builtin.set_fact:
+    three_x_ui_hub_star_model_files: "{{ lookup('ansible.builtin.fileglob', inventory_env_dir ~ '/models/three_x_ui/*.yml', wantlist=True) }}"
+
+- name: Load candidate 3x-ui star models for Xray reverse routing healthcheck
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+    name: three_x_ui_hub_candidate_model
+  register: three_x_ui_hub_candidate_models
+  loop: "{{ three_x_ui_hub_star_model_files }}"
+  when: three_x_ui_star_id is not defined
+
+- name: Initialize matching 3x-ui star model list
+  ansible.builtin.set_fact:
+    three_x_ui_hub_matching_star_models: []
+  when: three_x_ui_star_id is not defined
+
+- name: Select matching 3x-ui star models for current hub
+  ansible.builtin.set_fact:
+    three_x_ui_hub_matching_star_models: >-
+      {{
+        three_x_ui_hub_matching_star_models
+        + [item.ansible_facts.three_x_ui_hub_candidate_model.three_x_ui_star]
+      }}
+  loop: "{{ three_x_ui_hub_candidate_models.results | default([]) }}"
+  when:
+    - three_x_ui_star_id is not defined
+    - item.ansible_facts.three_x_ui_hub_candidate_model.three_x_ui_star.hub_host == inventory_hostname
+  no_log: true
+
+- name: Load explicit 3x-ui star model for Xray reverse routing healthcheck
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/three_x_ui/{{ three_x_ui_star_id }}.yml"
+    name: three_x_ui_hub_explicit_star_model
+  when: three_x_ui_star_id is defined
+
+- name: Select effective 3x-ui star models for Xray reverse routing healthcheck
+  ansible.builtin.set_fact:
+    three_x_ui_hub_healthcheck_star_models: >-
+      {{
+        (
+          [three_x_ui_hub_explicit_star_model.three_x_ui_star]
+          if three_x_ui_hub_explicit_star_model.three_x_ui_star.hub_host == inventory_hostname
+          else []
+        )
+        if three_x_ui_star_id is defined
+        else (three_x_ui_hub_matching_star_models | default([]))
+      }}
+
+- name: Validate 3x-ui star model for Xray reverse routing healthcheck
+  ansible.builtin.assert:
+    that:
+      - item.hub_host == inventory_hostname
+      - item.panel.inbound_tag | default('') | length > 0
+      - item.endpoint.host | default('') | length > 0
+      - item.clients | length > 0
+    fail_msg: "The 3x-ui star model is incomplete or does not match {{ inventory_hostname }}."
+  loop: "{{ three_x_ui_hub_healthcheck_star_models }}"
+  no_log: true
+
+- name: Check 3x-ui Xray reverse portals and routes
+  ansible.builtin.include_tasks: xray_reverse_routes_check.yml
+  vars:
+    three_x_ui_hub_star: "{{ three_x_ui_hub_healthcheck_star_model }}"
+  loop: "{{ three_x_ui_hub_healthcheck_star_models }}"
+  loop_control:
+    loop_var: three_x_ui_hub_healthcheck_star_model
+    label: "{{ three_x_ui_hub_healthcheck_star_model.id }}"
+
+- name: Check 3x-ui hub local SOCKS inbound and reverse probes
+  ansible.builtin.include_tasks: local_socks_check.yml
+  vars:
+    three_x_ui_hub_star: "{{ three_x_ui_hub_healthcheck_star_model }}"
+  loop: "{{ three_x_ui_hub_healthcheck_star_models }}"
+  loop_control:
+    loop_var: three_x_ui_hub_healthcheck_star_model
+    label: "{{ three_x_ui_hub_healthcheck_star_model.id }}"

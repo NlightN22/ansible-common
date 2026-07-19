@@ -1,0 +1,251 @@
+---
+- name: Select 3x-ui star model
+  ansible.builtin.set_fact:
+    three_x_ui_hub_star: "{{ three_x_ui_star }}"
+
+- name: Validate 3x-ui star model
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_star.hub_host == inventory_hostname
+      - three_x_ui_hub_star.panel.inbound_id | int > 0
+      - three_x_ui_hub_star.panel.protocol == 'trojan'
+      - three_x_ui_hub_star.reconciliation.preserve_existing_clients | bool
+      - not three_x_ui_hub_star.reconciliation.remove_unmanaged_clients | bool
+      - three_x_ui_hub_star.clients | length > 0
+    fail_msg: "The 3x-ui star model is incomplete or does not match {{ inventory_hostname }}."
+
+- name: Validate 3x-ui panel API credentials are configured
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_panel_url | length > 0
+      - three_x_ui_hub_panel_username | default('') | length > 0
+      - three_x_ui_hub_panel_password | default('') | length > 0
+    fail_msg: "3x-ui panel API credentials or URL are not configured on {{ inventory_hostname }}."
+
+- name: Login to 3x-ui panel API
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      username: "{{ three_x_ui_hub_panel_username }}"
+      password: "{{ three_x_ui_hub_panel_password }}"
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_panel_login
+  changed_when: false
+  failed_when: false
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Validate 3x-ui panel API login
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_panel_login.status == 200
+      - three_x_ui_hub_panel_login.json.success | default(false) | bool
+      - three_x_ui_hub_panel_login.cookies_string | default('') | length > 0
+    fail_msg: >-
+      3x-ui panel API login failed on {{ inventory_hostname }}
+      at {{ three_x_ui_hub_panel_url }}/login
+      with HTTP status {{ three_x_ui_hub_panel_login.status | default('unknown') }}.
+
+- name: Collect 3x-ui inbound list before client apply
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/list"
+    method: GET
+    headers:
+      Cookie: "{{ three_x_ui_hub_panel_login.cookies_string }}"
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_panel_inbounds_before
+  changed_when: false
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Select managed 3x-ui inbound
+  ansible.builtin.set_fact:
+    three_x_ui_hub_managed_inbound: >-
+      {{
+        three_x_ui_hub_panel_inbounds_before.json.obj
+        | selectattr('id', 'equalto', three_x_ui_hub_star.panel.inbound_id | int)
+        | first
+      }}
+
+- name: Validate managed 3x-ui inbound
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_managed_inbound is mapping
+      - three_x_ui_hub_managed_inbound.protocol == three_x_ui_hub_star.panel.protocol
+    fail_msg: "Managed 3x-ui inbound {{ three_x_ui_hub_star.panel.inbound_id }} was not found or has unexpected protocol."
+
+- name: Build current 3x-ui client list
+  ansible.builtin.set_fact:
+    three_x_ui_hub_current_clients: "{{ (three_x_ui_hub_managed_inbound.settings | from_json).clients | default([]) }}"
+    three_x_ui_hub_current_client_emails: "{{ ((three_x_ui_hub_managed_inbound.settings | from_json).clients | default([])) | map(attribute='email') | list }}"
+    three_x_ui_hub_star_client_emails: "{{ three_x_ui_hub_star.clients | rejectattr('state', 'equalto', 'absent') | map(attribute='email') | list }}"
+    three_x_ui_hub_managed_client_comment: "{{ three_x_ui_hub_client_comment | default('managed by infra-ansible') }}"
+
+- name: Initialize 3x-ui managed client metadata updates
+  ansible.builtin.set_fact:
+    three_x_ui_hub_clients_requiring_comment_update: []
+
+- name: Select 3x-ui clients requiring managed comment update
+  ansible.builtin.set_fact:
+    three_x_ui_hub_clients_requiring_comment_update: >-
+      {{
+        three_x_ui_hub_clients_requiring_comment_update
+        + [
+          item | combine({
+            'comment': three_x_ui_hub_managed_client_comment,
+            'updated_at': ansible_date_time.epoch ~ '000'
+          })
+        ]
+      }}
+  loop: "{{ three_x_ui_hub_current_clients }}"
+  when:
+    - item.email in three_x_ui_hub_star_client_emails
+    - item.comment | default('') != three_x_ui_hub_managed_client_comment
+  no_log: true
+
+- name: Select missing 3x-ui star clients
+  ansible.builtin.set_fact:
+    three_x_ui_hub_missing_clients: >-
+      {{
+        three_x_ui_hub_star.clients
+        | rejectattr('state', 'equalto', 'absent')
+        | rejectattr('email', 'in', three_x_ui_hub_current_client_emails)
+        | list
+      }}
+
+- name: Add missing Trojan clients to 3x-ui inbound
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/addClient"
+    method: POST
+    headers:
+      Cookie: "{{ three_x_ui_hub_panel_login.cookies_string }}"
+      Content-Type: application/json
+    body_format: raw
+    body: >-
+      {{
+        {
+          'id': three_x_ui_hub_star.panel.inbound_id | int,
+          'settings': {
+            'clients': [
+              {
+                'email': item.email,
+                'enable': true,
+                'expiryTime': item.expiry_time | default(0),
+                'limitIp': item.limit_ip | default(0),
+                'totalGB': item.total_gb | default(0),
+                'password': (
+                  item.password
+                  if item.password is defined and item.password | length > 0 and item.password is not search('CHANGE_ME')
+                  else lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=18)
+                ),
+                'subId': item.sub_id | default(lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=16)),
+                'tgId': item.tg_id | default(''),
+                'reset': item.reset | default(0),
+                'comment': item.comment | default(three_x_ui_hub_managed_client_comment),
+                'created_at': ansible_date_time.epoch ~ '000',
+                'updated_at': ansible_date_time.epoch ~ '000'
+              }
+            ]
+          } | to_json
+        } | to_json
+      }}
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_add_client_results
+  changed_when: three_x_ui_hub_add_client_results.json.success | default(false) | bool
+  failed_when: not (three_x_ui_hub_add_client_results.json.success | default(false) | bool)
+  loop: "{{ three_x_ui_hub_missing_clients }}"
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Update managed comments on existing 3x-ui Trojan clients
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/updateClient/{{ item.password }}"
+    method: POST
+    headers:
+      Cookie: "{{ three_x_ui_hub_panel_login.cookies_string }}"
+      Content-Type: application/json
+    body_format: raw
+    body: >-
+      {{
+        {
+          'id': three_x_ui_hub_star.panel.inbound_id | int,
+          'settings': {
+            'clients': [item]
+          } | to_json
+        } | to_json
+      }}
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_update_client_results
+  changed_when: three_x_ui_hub_update_client_results.json.success | default(false) | bool
+  failed_when: not (three_x_ui_hub_update_client_results.json.success | default(false) | bool)
+  loop: "{{ three_x_ui_hub_clients_requiring_comment_update }}"
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Collect 3x-ui inbound list after client apply
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/list"
+    method: GET
+    headers:
+      Cookie: "{{ three_x_ui_hub_panel_login.cookies_string }}"
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_panel_inbounds_after
+  changed_when: false
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+
+- name: Select managed 3x-ui inbound after apply
+  ansible.builtin.set_fact:
+    three_x_ui_hub_managed_inbound_after: >-
+      {{
+        three_x_ui_hub_panel_inbounds_after.json.obj
+        | selectattr('id', 'equalto', three_x_ui_hub_star.panel.inbound_id | int)
+        | first
+      }}
+
+- name: Build final 3x-ui client list
+  ansible.builtin.set_fact:
+    three_x_ui_hub_final_clients: "{{ (three_x_ui_hub_managed_inbound_after.settings | from_json).clients | default([]) }}"
+    three_x_ui_hub_final_client_emails: "{{ ((three_x_ui_hub_managed_inbound_after.settings | from_json).clients | default([])) | map(attribute='email') | list }}"
+
+- name: Validate all 3x-ui star clients are present
+  ansible.builtin.assert:
+    that:
+      - item.email in three_x_ui_hub_final_client_emails
+    fail_msg: "Expected 3x-ui client {{ item.email }} is missing after apply."
+  loop: "{{ three_x_ui_hub_star.clients }}"
+  no_log: true
+
+- name: Validate all 3x-ui star clients have managed comment
+  ansible.builtin.assert:
+    that:
+      - (three_x_ui_hub_final_clients | selectattr('email', 'equalto', item.email) | first).comment | default('') == three_x_ui_hub_managed_client_comment
+    fail_msg: "Expected 3x-ui client {{ item.email }} to have managed comment after apply."
+  loop: "{{ three_x_ui_hub_star.clients }}"
+  no_log: true
+
+- name: Apply 3x-ui hub runtime local SOCKS inbound
+  ansible.builtin.include_tasks: local_socks_apply.yml
+
+- name: Apply 3x-ui reverse portals and LAN routes for star clients
+  ansible.builtin.include_tasks: xray_reverse_routes_apply.yml
+
+- name: Report 3x-ui star client apply result
+  ansible.builtin.debug:
+    msg: >-
+      3x-ui star {{ three_x_ui_hub_star.id }} on {{ inventory_hostname }}:
+      {{ three_x_ui_hub_missing_clients | length }} client(s) added,
+      {{ three_x_ui_hub_clients_requiring_comment_update | length }} client comment(s) updated,
+      {{ three_x_ui_hub_final_client_emails | length }} client(s) currently present in inbound {{ three_x_ui_hub_star.panel.inbound_id }}.

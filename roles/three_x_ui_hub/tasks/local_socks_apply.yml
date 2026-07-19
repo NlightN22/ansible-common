@@ -1,0 +1,28 @@
+---
+- name: Build 3x-ui hub local SOCKS inbound spec
+  ansible.builtin.include_tasks: local_socks_spec.yml
+
+- name: Apply 3x-ui hub local SOCKS inbound
+  ansible_common.core.three_x_ui_xray_apply:
+    panel_url: "{{ three_x_ui_hub_panel_url }}"
+    username: "{{ three_x_ui_hub_panel_username }}"
+    password: "{{ three_x_ui_hub_panel_password }}"
+    verify_tls: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    timeout: 20
+    backup_path: >-
+      {{ three_x_ui_hub_backup_root }}/three-x-ui-xray-template-{{ inventory_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.json
+    spec:
+      inbounds: "{{ three_x_ui_hub_local_socks_inbounds }}"
+  register: three_x_ui_hub_local_socks_apply
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+  when: three_x_ui_hub_local_socks_inbounds | length > 0
+
+- name: Report 3x-ui hub local SOCKS apply result
+  ansible.builtin.debug:
+    msg: >-
+      3x-ui hub {{ inventory_hostname }} local SOCKS:
+      changed={{ three_x_ui_hub_local_socks_apply.changed | default(false) }},
+      inbounds added={{ three_x_ui_hub_local_socks_apply.inbounds_added | default(0) }},
+      inbounds updated={{ three_x_ui_hub_local_socks_apply.inbounds_updated | default(0) }}.
+  when: three_x_ui_hub_local_socks_apply is defined

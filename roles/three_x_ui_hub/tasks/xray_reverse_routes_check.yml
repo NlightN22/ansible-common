@@ -1,0 +1,33 @@
+---
+- name: Build 3x-ui Xray reverse routing spec
+  ansible.builtin.include_tasks: xray_reverse_routes_spec.yml
+
+- name: Check 3x-ui Xray reverse portals and routes
+  ansible_common.core.three_x_ui_xray_apply:
+    panel_url: "{{ three_x_ui_hub_panel_url }}"
+    username: "{{ three_x_ui_hub_panel_username }}"
+    password: "{{ three_x_ui_hub_panel_password }}"
+    verify_tls: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    timeout: 20
+    spec:
+      reverse_portals: "{{ three_x_ui_hub_xray_reverse_portals }}"
+      routes: "{{ three_x_ui_hub_xray_routes }}"
+  register: three_x_ui_hub_xray_healthcheck
+  changed_when: false
+  check_mode: true
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+  when: three_x_ui_hub_xray_reverse_portals | length > 0
+
+- name: Validate 3x-ui Xray reverse portals and routes
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_xray_healthcheck.portals_added | default(0) | int == 0
+      - three_x_ui_hub_xray_healthcheck.portals_deleted | default(0) | int == 0
+      - three_x_ui_hub_xray_healthcheck.routes_added | default(0) | int == 0
+      - three_x_ui_hub_xray_healthcheck.routes_deleted | default(0) | int == 0
+    fail_msg: >-
+      3x-ui Xray reverse routing drift detected on {{ inventory_hostname }} for star
+      {{ three_x_ui_hub_star.id }}. Run the consumer project's 3x-ui apply playbook
+      with three_x_ui_star_id={{ three_x_ui_hub_star.id }} to repair it.
+  when: three_x_ui_hub_xray_healthcheck is defined

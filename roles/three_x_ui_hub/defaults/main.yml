@@ -1,0 +1,57 @@
+---
+three_x_ui_hub_project_dir: /opt/3x-ui-docker
+three_x_ui_hub_domain: "{{ inventory_hostname }}"
+three_x_ui_hub_image: ghcr.io/mhsanaei/3x-ui:2.8.11
+three_x_ui_hub_xp2pdiag_image: oncharterliz/xp2pdiag:latest
+three_x_ui_hub_re_filter_dat_enabled: true
+three_x_ui_hub_re_filter_dat_path: "{{ three_x_ui_hub_project_dir }}/re-filter.dat"
+three_x_ui_hub_web_base_path: /kqrZAojwJOB1cNM0Vw/
+three_x_ui_hub_panel_scheme: https
+three_x_ui_hub_panel_host: "{{ inventory_hostname }}"
+three_x_ui_hub_panel_port: 36588
+three_x_ui_hub_panel_url: "{{ three_x_ui_hub_panel_scheme }}://{{ three_x_ui_hub_panel_host }}:{{ three_x_ui_hub_panel_port }}{{ three_x_ui_hub_web_base_path | regex_replace('/$', '') }}"
+three_x_ui_hub_panel_api_delegate_to: localhost
+three_x_ui_hub_panel_validate_certs: false
+three_x_ui_hub_backup_root: /root/tmp
+three_x_ui_hub_backup_prefix: backup-three-x-ui-bootstrap
+three_x_ui_hub_allowed_tcp_ports:
+  - 22
+  - 80
+  - 443
+  - 36588
+three_x_ui_hub_allowed_udp_ports: []
+three_x_ui_hub_daemon_config:
+  log-driver: local
+  log-opts:
+    max-size: 20m
+    max-file: "5"
+three_x_ui_hub_bootstrap_packages: []
+three_x_ui_hub_repair_baseline_packages: false
+three_x_ui_hub_required_commands:
+  - curl
+  - dig
+  - nslookup
+  - iperf3
+  - docker
+  - ss
+three_x_ui_hub_container_name_patterns:
+  - 3x-ui
+  - x-ui
+three_x_ui_hub_expected_process_patterns:
+  - xray
+three_x_ui_hub_healthcheck_urls: []
+three_x_ui_hub_local_socks:
+  enabled: true
+  bind_host: 127.0.0.1
+  port: 1080
+  protocol: socks
+  tag: managed-local-socks
+  managed: true
+  adopt_existing: true
+  settings:
+    auth: noauth
+    udp: true
+  sniffing:
+    enabled: false
+three_x_ui_hub_local_socks_probe_timeout: 10
+three_x_ui_hub_openwrt_reverse_probe_require_explicit: true

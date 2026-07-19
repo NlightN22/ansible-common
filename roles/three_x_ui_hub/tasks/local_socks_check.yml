@@ -1,0 +1,175 @@
+---
+- name: Build 3x-ui hub local SOCKS inbound spec
+  ansible.builtin.include_tasks: local_socks_spec.yml
+
+- name: Check 3x-ui hub local SOCKS inbound drift
+  ansible_common.core.three_x_ui_xray_apply:
+    panel_url: "{{ three_x_ui_hub_panel_url }}"
+    username: "{{ three_x_ui_hub_panel_username }}"
+    password: "{{ three_x_ui_hub_panel_password }}"
+    verify_tls: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    timeout: 20
+    spec:
+      inbounds: "{{ three_x_ui_hub_local_socks_inbounds }}"
+  register: three_x_ui_hub_local_socks_healthcheck
+  changed_when: false
+  check_mode: true
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+  when: three_x_ui_hub_local_socks_inbounds | length > 0
+
+- name: Validate 3x-ui hub local SOCKS inbound state
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_local_socks_healthcheck.inbounds_added | default(0) | int == 0
+      - three_x_ui_hub_local_socks_healthcheck.inbounds_updated | default(0) | int == 0
+      - three_x_ui_hub_local_socks_healthcheck.inbounds_deleted | default(0) | int == 0
+    fail_msg: >-
+      3x-ui hub local SOCKS drift detected on {{ inventory_hostname }}.
+      Run the consumer project's 3x-ui apply playbook with the selected
+      three_x_ui_star_id and apply confirmation enabled to repair it.
+  when: three_x_ui_hub_local_socks_healthcheck is defined
+
+- name: Validate 3x-ui hub local SOCKS listener
+  ansible.builtin.assert:
+    that:
+      - >-
+        three_x_ui_hub_tcp_listeners.stdout is search(
+          'LISTEN\\s+\\S+\\s+\\S+\\s+'
+          ~ (three_x_ui_hub_local_socks.bind_host | regex_escape)
+          ~ ':'
+          ~ (three_x_ui_hub_local_socks.port | string)
+          ~ '\\s+'
+        )
+    fail_msg: >-
+      3x-ui hub local SOCKS listener
+      {{ three_x_ui_hub_local_socks.bind_host }}:{{ three_x_ui_hub_local_socks.port }}
+      was not found on {{ inventory_hostname }}.
+  when: three_x_ui_hub_local_socks.enabled | default(false) | bool
+
+- name: Load host management overrides for OpenWrt reverse probes
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/hosts/management_overrides.yml"
+    name: three_x_ui_hub_management_model
+
+- name: Initialize effective 3x-ui hub reverse checks
+  ansible.builtin.set_fact:
+    three_x_ui_hub_effective_reverse_checks: "{{ three_x_ui_hub_star.hub_reverse_checks | default([]) }}"
+
+- name: Build default OpenWrt router reverse checks
+  ansible.builtin.set_fact:
+    three_x_ui_hub_effective_reverse_checks: >-
+      {{
+        three_x_ui_hub_effective_reverse_checks
+        + [
+          {
+            'name': (item.host | lower | regex_replace('[^a-z0-9]+', '_')) ~ '_openwrt_web',
+            'url': (
+              three_x_ui_hub_probe_scheme ~ '://'
+              ~ three_x_ui_hub_probe_host ~ ':'
+              ~ (three_x_ui_hub_probe_port | string)
+              ~ three_x_ui_hub_probe_path
+            ),
+            'expected_http_status': three_x_ui_hub_probe_expected_http_status | int,
+            'tls_verify': three_x_ui_hub_probe_tls_verify | bool,
+            'plain_route_diagnostic': true
+          }
+        ]
+      }}
+  vars:
+    three_x_ui_hub_probe: "{{ hostvars[item.host].openwrt_reverse_probe | default({}) }}"
+    three_x_ui_hub_management_override: >-
+      {{ three_x_ui_hub_management_model.management_overrides[item.host] | default({}) }}
+    three_x_ui_hub_probe_host: >-
+      {{
+        three_x_ui_hub_probe.host
+        | default((((three_x_ui_hub_management_override.declared_addresses.lan | default([])) | first).address) | default(''))
+      }}
+    three_x_ui_hub_probe_scheme: "{{ three_x_ui_hub_probe.scheme | default('http') }}"
+    three_x_ui_hub_probe_port: "{{ three_x_ui_hub_probe.port | default(80) }}"
+    three_x_ui_hub_probe_path: "{{ three_x_ui_hub_probe.path | default('/') | regex_replace('^([^/])', '/\\1') }}"
+    three_x_ui_hub_probe_expected_http_status: "{{ three_x_ui_hub_probe.expected_http_status | default(200) }}"
+    three_x_ui_hub_probe_tls_verify: "{{ three_x_ui_hub_probe.tls_verify | default(false) }}"
+  loop: "{{ three_x_ui_hub_star.clients }}"
+  loop_control:
+    label: "{{ item.host }}"
+  when:
+    - item.state | default('present') != 'absent'
+    - item.host in (groups.openwrt | default([]))
+    - >-
+      not (three_x_ui_hub_openwrt_reverse_probe_require_explicit | bool)
+      or hostvars[item.host].openwrt_reverse_probe is defined
+    - three_x_ui_hub_probe.enabled | default(true) | bool
+    - three_x_ui_hub_probe_host | length > 0
+
+- name: Run 3x-ui hub reverse HTTP checks through local SOCKS
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'curl',
+          '--socks5-hostname',
+          three_x_ui_hub_local_socks.bind_host ~ ':' ~ (three_x_ui_hub_local_socks.port | string),
+          '--silent',
+          '--show-error',
+          '--output',
+          '/dev/null',
+          '--write-out',
+          '%{http_code}',
+          '--max-time',
+          three_x_ui_hub_local_socks_probe_timeout | string
+        ]
+        + ([ '-k' ] if not (item.tls_verify | default(true) | bool) else [])
+        + [item.url]
+      }}
+  register: three_x_ui_hub_reverse_socks_checks
+  changed_when: false
+  failed_when: false
+  loop: "{{ three_x_ui_hub_effective_reverse_checks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - three_x_ui_hub_local_socks.enabled | default(false) | bool
+    - three_x_ui_hub_effective_reverse_checks | length > 0
+
+- name: Validate 3x-ui hub reverse HTTP checks through local SOCKS
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | int == item.item.expected_http_status | default(200) | int
+    fail_msg: >-
+      3x-ui hub reverse check {{ item.item.name }} through SOCKS
+      {{ three_x_ui_hub_local_socks.bind_host }}:{{ three_x_ui_hub_local_socks.port }}
+      failed on {{ inventory_hostname }} with rc={{ item.rc }} http={{ item.stdout | default('') }}.
+  loop: "{{ three_x_ui_hub_reverse_socks_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: three_x_ui_hub_reverse_socks_checks is defined
+
+- name: Run diagnostic plain HTTP checks without local SOCKS
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'curl',
+          '--silent',
+          '--show-error',
+          '--output',
+          '/dev/null',
+          '--write-out',
+          '%{http_code}',
+          '--max-time',
+          three_x_ui_hub_local_socks_probe_timeout | string
+        ]
+        + ([ '-k' ] if not (item.tls_verify | default(true) | bool) else [])
+        + [item.url]
+      }}
+  register: three_x_ui_hub_reverse_plain_checks
+  changed_when: false
+  failed_when: false
+  loop: "{{ three_x_ui_hub_effective_reverse_checks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - three_x_ui_hub_effective_reverse_checks | length > 0
+    - item.plain_route_diagnostic | default(true) | bool

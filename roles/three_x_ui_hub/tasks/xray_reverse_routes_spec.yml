@@ -1,0 +1,57 @@
+---
+- name: Initialize 3x-ui Xray reverse routing spec
+  ansible.builtin.set_fact:
+    three_x_ui_hub_xray_reverse_portals: []
+    three_x_ui_hub_xray_routes: []
+
+- name: Build 3x-ui Xray reverse routing entries
+  ansible.builtin.set_fact:
+    three_x_ui_hub_xray_reverse_portals: >-
+      {{
+        three_x_ui_hub_xray_reverse_portals
+        + [
+          {
+            'state': item.state | default('present'),
+            'tag': three_x_ui_hub_reverse_tag,
+            'domain': three_x_ui_hub_reverse_tag
+          }
+        ]
+      }}
+    three_x_ui_hub_xray_routes: >-
+      {{
+        three_x_ui_hub_xray_routes
+        + [
+          {
+            'state': item.state | default('present'),
+            'type': 'field',
+            'outboundTag': three_x_ui_hub_reverse_tag,
+            'inboundTag': [three_x_ui_hub_star.panel.inbound_tag],
+            'domain': ['full:' ~ three_x_ui_hub_reverse_tag]
+          },
+          {
+            'state': item.state | default('present'),
+            'type': 'field',
+            'outboundTag': three_x_ui_hub_reverse_tag,
+            'ip': [hostvars[item.host].site_lan_cidr]
+          }
+        ]
+      }}
+  vars:
+    three_x_ui_hub_reverse_tag: >-
+      {{
+        (
+          item.host | lower | regex_replace('[^a-z0-9]+', '-')
+        )
+        ~
+        (
+          three_x_ui_hub_star.endpoint.host | lower | regex_replace('[^a-z0-9]+', '-')
+        )
+        ~ '.rev'
+      }}
+  loop: "{{ three_x_ui_hub_star.clients }}"
+  when:
+    - item.state | default('present') != 'absent'
+    - hostvars[item.host].site_lan_cidr is defined
+    - three_x_ui_hub_star.panel.inbound_tag | default('') | length > 0
+    - three_x_ui_hub_star.endpoint.host | default('') | length > 0
+  no_log: true
