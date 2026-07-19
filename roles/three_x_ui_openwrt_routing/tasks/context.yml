@@ -1,0 +1,61 @@
+---
+- name: Select 3x-ui OpenWrt routing star
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_routing_star: "{{ three_x_ui_star }}"
+
+- name: Select 3x-ui OpenWrt routing client model
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_routing_client: >-
+      {{
+        openwrt_xp2p_three_x_ui_routing_star.clients
+        | selectattr('host', 'equalto', inventory_hostname)
+        | first
+      }}
+
+- name: Build 3x-ui OpenWrt routing settings
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_routing_defaults: "{{ openwrt_xp2p_three_x_ui_routing_star.openwrt_routing | default({}) }}"
+    openwrt_xp2p_three_x_ui_routing_client_settings: "{{ openwrt_xp2p_three_x_ui_routing_client.openwrt_routing | default({}) }}"
+
+- name: Build effective 3x-ui OpenWrt routing settings
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_routing: >-
+      {{
+        openwrt_xp2p_three_x_ui_routing_defaults
+        | combine(openwrt_xp2p_three_x_ui_routing_client_settings, recursive=True)
+      }}
+
+- name: Validate 3x-ui OpenWrt routing model
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in openwrt_xp2p_three_x_ui_routing_star.clients | map(attribute='host') | list
+      - openwrt_xp2p_three_x_ui_routing.enabled | default(false) | bool
+      - openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.routing_template | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.remote_config_dir | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.remote_dat_dir | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.dat_files | default([]) | length > 0
+      - openwrt_xp2p_three_x_ui_routing.socks_port | default(0) | int > 0
+      - openwrt_xp2p_three_x_ui_routing.socks_egress_checks | default([]) | length > 0
+      - >-
+        openwrt_xp2p_three_x_ui_routing.socks_egress_checks
+        | selectattr('url', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_routing.socks_egress_checks | length
+      - >-
+        openwrt_xp2p_three_x_ui_routing.socks_egress_checks
+        | selectattr('expected_public_ip', 'defined')
+        | list
+        | length
+        +
+        openwrt_xp2p_three_x_ui_routing.socks_egress_checks
+        | selectattr('expected_public_ip_host', 'defined')
+        | list
+        | length
+        +
+        openwrt_xp2p_three_x_ui_routing.socks_egress_checks
+        | selectattr('expected_country', 'defined')
+        | list
+        | length
+        == openwrt_xp2p_three_x_ui_routing.socks_egress_checks | length
+    fail_msg: "The 3x-ui OpenWrt routing model is incomplete for {{ inventory_hostname }}."

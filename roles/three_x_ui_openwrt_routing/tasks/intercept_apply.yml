@@ -1,0 +1,307 @@
+---
+- name: Remove legacy 3x-ui OpenWrt LAN intercept state
+  ansible.builtin.raw: |
+    set -eu
+    table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default("100") }}'
+    lan_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.lan_interface | default("br-lan") }}'
+    firewall_rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.firewall_rule_section | default("xp2pc_lan_intercept_mark") }}'
+    changed=false
+    network_changed=false
+
+    remove_section() {
+      config="$1"
+      name="$2"
+      if uci -q get "${config}.${name}" >/dev/null 2>&1; then
+        uci delete "${config}.${name}"
+        changed=true
+      fi
+    }
+
+    remove_section firewall xp2pc_lan_intercept
+    remove_section firewall "$firewall_rule_name"
+    remove_section firewall zavodskaya_xp2p_pilot_remote_phone_tcp
+    remove_section firewall zavodskaya_xp2p_pilot_remote_phone_udp_low
+    remove_section firewall zavodskaya_xp2p_pilot_remote_phone_udp_mid
+    remove_section firewall zavodskaya_xp2p_pilot_remote_phone_udp_high
+
+    for section in $(uci show firewall 2>/dev/null | sed -n "s/^\([^=]*\)=include$/\1/p"); do
+      [ "$(uci -q get "${section}.name" 2>/dev/null || true)" = xp2pc_lan_intercept ] || continue
+      uci delete "$section"
+      changed=true
+    done
+
+    for section in $(uci show firewall 2>/dev/null | sed -n "s/^\([^=]*\)=rule$/\1/p"); do
+      section_name="$(uci -q get "${section}.name" 2>/dev/null || true)"
+      target="$(uci -q get "${section}.target" 2>/dev/null || true)"
+      set_mark="$(uci -q get "${section}.set_mark" 2>/dev/null || true)"
+      if [ "$section_name" = "Mark to tun0" ] ||
+         { [ "$target" = MARK ] && [ "$set_mark" = 1 ]; }; then
+        uci delete "$section"
+        changed=true
+      fi
+    done
+
+    for section in $(uci show network 2>/dev/null | sed -n "s/^\([^=]*\)=rule$/\1/p"); do
+      section_mark="$(uci -q get "${section}.mark" 2>/dev/null || true)"
+      section_lookup="$(uci -q get "${section}.lookup" 2>/dev/null || uci -q get "${section}.table" 2>/dev/null || true)"
+      section_priority="$(uci -q get "${section}.priority" 2>/dev/null || true)"
+      section_src="$(uci -q get "${section}.src" 2>/dev/null || true)"
+      section_in="$(uci -q get "${section}.in" 2>/dev/null || true)"
+      if { [ "$section_mark" = 1 ] && [ "$section_lookup" = "$table" ]; } ||
+         { [ "$section_priority" = 99 ] && [ "$section_lookup" = main ] && [ "$section_in" = "$lan_if" ] && [ -n "$section_src" ]; }; then
+        uci delete "$section"
+        changed=true
+        network_changed=true
+      fi
+    done
+
+    for section in $(uci show network 2>/dev/null | sed -n "s/^\([^=]*\)=route$/\1/p"); do
+      section_table="$(uci -q get "${section}.table" 2>/dev/null || true)"
+      section_interface="$(uci -q get "${section}.interface" 2>/dev/null || true)"
+      section_target="$(uci -q get "${section}.target" 2>/dev/null || true)"
+      if [ "$section_table" = "$table" ] &&
+         [ "$section_target" = "0.0.0.0/0" ] &&
+         { [ "$section_interface" = tun0 ] || [ "$section_interface" = sb-tun0 ]; }; then
+        uci delete "$section"
+        changed=true
+        network_changed=true
+      fi
+    done
+
+    legacy_rule="$(ip -4 rule show 2>/dev/null | awk -v lan_if="$lan_if" '$1 == "99:" && index($0, "iif " lan_if " ") && $0 ~ / lookup main$/ { print; exit }' || true)"
+    if [ -n "$legacy_rule" ]; then
+      legacy_from="$(printf '%s\n' "$legacy_rule" | sed -n 's/^99:[[:space:]]*from \([^[:space:]]*\).*/\1/p')"
+      if [ -n "$legacy_from" ]; then
+        ip rule del priority 99 from "$legacy_from" iif "$lan_if" lookup main 2>/dev/null || true
+      else
+        ip rule del priority 99 iif "$lan_if" lookup main 2>/dev/null || true
+      fi
+      changed=true
+      network_changed=true
+    fi
+
+    for path in \
+      '{{ openwrt_xp2p_three_x_ui_routing.intercept.nft_path | default("/etc/xp2p/xp2pc-lan-intercept.nft") }}' \
+      /etc/nftables.d/xp2pc-lan-intercept.nft; do
+      if [ -f "$path" ]; then
+        rm -f "$path"
+        changed=true
+      fi
+    done
+
+    if [ "$changed" = true ]; then
+      uci commit firewall
+      uci commit network
+      [ "$network_changed" = true ] && /etc/init.d/network reload || true
+      echo changed=true
+    else
+      echo changed=false
+    fi
+  register: openwrt_xp2p_three_x_ui_intercept_cleanup
+  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_cleanup.stdout"
+
+- name: Apply 3x-ui OpenWrt LAN intercept firewall base
+  ansible.builtin.raw: |
+    set -eu
+    xp2pc_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default("xp2pc") }}'
+    firewall_rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.firewall_rule_section | default("xp2pc_lan_intercept_mark") }}'
+    private_set_name="${firewall_rule_name}_private"
+    changed=false
+
+    ensure_section() {
+      type="$1"
+      name="$2"
+      config="$3"
+      if [ "$(uci -q get "${config}.${name}" 2>/dev/null || true)" != "$type" ]; then
+        uci set "${config}.${name}=${type}"
+        changed=true
+      fi
+      echo "${config}.${name}"
+    }
+
+    zone_section="$(ensure_section zone "$xp2pc_if" firewall)"
+    for option in name="$xp2pc_if" input=REJECT output=ACCEPT forward=REJECT network="$xp2pc_if"; do
+      key="${option%%=*}"
+      value="${option#*=}"
+      if [ "$(uci -q get "${zone_section}.${key}" || true)" != "$value" ]; then
+        uci set "${zone_section}.${key}=$value"
+        changed=true
+      fi
+    done
+
+    forwarding_section="$(ensure_section forwarding "lan_to_${xp2pc_if}" firewall)"
+    for option in src=lan dest="$xp2pc_if"; do
+      key="${option%%=*}"
+      value="${option#*=}"
+      if [ "$(uci -q get "${forwarding_section}.${key}" || true)" != "$value" ]; then
+        uci set "${forwarding_section}.${key}=$value"
+        changed=true
+      fi
+    done
+
+    private_set_section="$(ensure_section ipset "$private_set_name" firewall)"
+    for option in name="$private_set_name" family=ipv4 enabled=1; do
+      key="${option%%=*}"
+      value="${option#*=}"
+      if [ "$(uci -q get "${private_set_section}.${key}" || true)" != "$value" ]; then
+        uci set "${private_set_section}.${key}=$value"
+        changed=true
+      fi
+    done
+    current_match="$( (uci -q get "${private_set_section}.match" 2>/dev/null || true) | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    if [ "$current_match" != dest_net ]; then
+      uci -q delete "${private_set_section}.match" || true
+      uci add_list "${private_set_section}.match=dest_net"
+      changed=true
+    fi
+    current_entries="$( (uci -q get "${private_set_section}.entry" 2>/dev/null || true) | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    desired_entries="$(printf '%s\n' {% for cidr in openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"]) %}'{{ cidr }}' {% endfor %} | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    if [ "$current_entries" != "$desired_entries" ]; then
+      uci -q delete "${private_set_section}.entry" || true
+      for cidr in {% for cidr in openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"]) %}'{{ cidr }}' {% endfor %}; do
+        uci add_list "${private_set_section}.entry=$cidr"
+      done
+      changed=true
+    fi
+
+    if [ "$changed" = true ]; then
+      uci commit firewall
+      /etc/init.d/firewall reload
+      echo changed=true
+    else
+      echo changed=false
+    fi
+  register: openwrt_xp2p_three_x_ui_intercept_firewall_base
+  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_firewall_base.stdout"
+
+- name: Apply 3x-ui OpenWrt LAN intercept mark rules
+  ansible.builtin.raw: |
+    set -eu
+    mark='{{ openwrt_xp2p_three_x_ui_routing.intercept.fwmark | default("0x66") }}'
+    firewall_rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.firewall_rule_section | default("xp2pc_lan_intercept_mark") }}'
+    private_set_name="${firewall_rule_name}_private"
+    intercept_mode='{{ openwrt_xp2p_three_x_ui_routing.intercept.mode | default("web") }}'
+    changed=false
+
+    ensure_rule() {
+      name="$1"
+      if [ "$(uci -q get "firewall.${name}" 2>/dev/null || true)" != rule ]; then
+        uci set "firewall.${name}=rule"
+        changed=true
+      fi
+      echo "firewall.${name}"
+    }
+
+    apply_mark_rule() {
+      section_name="$1"
+      display_name="$2"
+      proto="$3"
+      dest_port="$4"
+      section="$(ensure_rule "$section_name")"
+      for option in name="$display_name" family=ipv4 src=lan dest="*" proto="$proto" ipset="!${private_set_name} dest" target=MARK set_mark="$mark" enabled=1; do
+        key="${option%%=*}"
+        value="${option#*=}"
+        if [ "$(uci -q get "${section}.${key}" || true)" != "$value" ]; then
+          uci set "${section}.${key}=$value"
+          changed=true
+        fi
+      done
+      if [ -n "$dest_port" ]; then
+        if [ "$(uci -q get "${section}.dest_port" || true)" != "$dest_port" ]; then
+          uci set "${section}.dest_port=$dest_port"
+          changed=true
+        fi
+      elif uci -q get "${section}.dest_port" >/dev/null 2>&1; then
+        uci delete "${section}.dest_port"
+        changed=true
+      fi
+      desired_src_ips="$(printf '%s\n' {% for source in openwrt_xp2p_three_x_ui_routing.intercept.source_exclusions | default([]) %}'!{{ source }}' {% endfor %} | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      current_src_ips="$( (uci -q get "${section}.src_ip" 2>/dev/null || true) | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      if [ "$current_src_ips" != "$desired_src_ips" ]; then
+        uci -q delete "${section}.src_ip" || true
+        for source in {% for source in openwrt_xp2p_three_x_ui_routing.intercept.source_exclusions | default([]) %}'!{{ source }}' {% endfor %}; do
+          uci add_list "${section}.src_ip=$source"
+        done
+        changed=true
+      fi
+      if uci -q get "${section}.extra" >/dev/null 2>&1; then
+        uci delete "${section}.extra"
+        changed=true
+      fi
+    }
+
+    if [ "$intercept_mode" = full ]; then
+      apply_mark_rule "${firewall_rule_name}_tcp" "XP2PC LAN intercept mark TCP full" tcp ""
+      for udp_port in {% for port in openwrt_xp2p_three_x_ui_routing.intercept.udp_mark_ports | default(["1-52", "54-122", "124-65535"]) %}'{{ port }}' {% endfor %}; do
+        section_port="$(printf '%s\n' "$udp_port" | tr -c 'A-Za-z0-9_' '_')"
+        apply_mark_rule "${firewall_rule_name}_udp_${section_port}" "XP2PC LAN intercept mark UDP ${udp_port}" udp "$udp_port"
+      done
+      uci -q delete "firewall.${firewall_rule_name}_udp" && changed=true || true
+    else
+      apply_mark_rule "${firewall_rule_name}_tcp" "XP2PC LAN intercept mark TCP 80 443" tcp "80 443"
+      apply_mark_rule "${firewall_rule_name}_udp" "XP2PC LAN intercept mark UDP 443" udp "443"
+      for section in $(uci show firewall 2>/dev/null | sed -n "s/^firewall\\.\\(${firewall_rule_name}_udp_[^=]*\\)=rule$/\\1/p"); do
+        uci delete "firewall.${section}"
+        changed=true
+      done
+    fi
+
+    if [ "$changed" = true ]; then
+      uci commit firewall
+      /etc/init.d/firewall reload
+      echo changed=true
+    else
+      echo changed=false
+    fi
+  register: openwrt_xp2p_three_x_ui_intercept_mark_rules
+  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_mark_rules.stdout"
+
+- name: Apply 3x-ui OpenWrt LAN intercept policy route
+  ansible.builtin.raw: |
+    set -eu
+    mark='{{ openwrt_xp2p_three_x_ui_routing.intercept.fwmark | default("0x66") }}'
+    table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default("100") }}'
+    xp2pc_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default("xp2pc") }}'
+    rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default("xp2pc_lan_intercept") }}'
+    route_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default("xp2pc_lan_intercept_default") }}'
+    changed=false
+
+    ensure_section() {
+      type="$1"
+      name="$2"
+      if [ "$(uci -q get "network.${name}" 2>/dev/null || true)" != "$type" ]; then
+        uci set "network.${name}=${type}"
+        changed=true
+      fi
+      echo "network.${name}"
+    }
+
+    rule_section="$(ensure_section rule "$rule_name")"
+    for option in mark="$mark/0xffffffff" lookup="$table" priority=100 disabled=0; do
+      key="${option%%=*}"
+      value="${option#*=}"
+      if [ "$(uci -q get "${rule_section}.${key}" || true)" != "$value" ]; then
+        uci set "${rule_section}.${key}=$value"
+        changed=true
+      fi
+    done
+
+    route_section="$(ensure_section route "$route_name")"
+    for option in interface="$xp2pc_if" target=0.0.0.0/0 table="$table" disabled=0; do
+      key="${option%%=*}"
+      value="${option#*=}"
+      if [ "$(uci -q get "${route_section}.${key}" || true)" != "$value" ]; then
+        uci set "${route_section}.${key}=$value"
+        changed=true
+      fi
+    done
+
+    if [ "$changed" = true ]; then
+      uci commit network
+      /etc/init.d/network reload
+      echo changed=true
+    else
+      echo changed=false
+    fi
+  register: openwrt_xp2p_three_x_ui_intercept_policy_route
+  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_policy_route.stdout"

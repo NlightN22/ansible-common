@@ -1,0 +1,387 @@
+---
+- name: Prepare 3x-ui OpenWrt routing healthcheck context
+  ansible.builtin.include_tasks: context.yml
+
+- name: Initialize 3x-ui OpenWrt healthcheck failure list
+  ansible.builtin.set_fact:
+    three_x_ui_openwrt_healthcheck_failures: []
+
+- name: Load generated management address observations for egress checks
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../../inventory/prod/generated/management_addresses.yml"
+    name: management_generated_model
+
+- name: Check 3x-ui OpenWrt routing dat freshness
+  community.openwrt.command:
+    cmd: >-
+      test -s '{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ item.name }}'
+      && find '{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ item.name }}'
+      -type f -mtime '-{{ three_x_ui_openwrt_dat_refresh_max_age_days | default(openwrt_xp2p_three_x_ui_routing.dat_max_age_days | default(openwrt_xp2p_three_x_ui_routing_dat_max_age_days)) | int }}'
+      -print | grep -F '{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ item.name }}'
+    uses_shell: true
+  changed_when: false
+  loop: "{{ openwrt_xp2p_three_x_ui_routing.dat_files }}"
+
+- name: Check 3x-ui OpenWrt routing state
+  ansible.builtin.raw: |
+    set -eu
+    command -v xp2p >/dev/null
+    /etc/init.d/xp2p-client enabled >/dev/null
+    /etc/init.d/xp2p-client running >/dev/null
+    for file in {% for dat_file in openwrt_xp2p_three_x_ui_routing.dat_files %}'{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ dat_file.name }}' {% endfor %}; do
+      test -s "$file"
+    done
+    test -s '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
+    grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' >/dev/null
+    grep -A3 -F '"network": "tcp,udp"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
+      grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' >/dev/null
+  register: openwrt_xp2p_three_x_ui_routing_state_healthcheck
+  changed_when: false
+  failed_when: false
+
+- name: Record 3x-ui OpenWrt routing state healthcheck failure
+  ansible.builtin.set_fact:
+    three_x_ui_openwrt_healthcheck_failures: >-
+      {{
+        three_x_ui_openwrt_healthcheck_failures
+        + [
+          'Routing state failed on ' ~ inventory_hostname ~
+          ': ' ~ (
+            openwrt_xp2p_three_x_ui_routing_state_healthcheck.stdout
+            | default(openwrt_xp2p_three_x_ui_routing_state_healthcheck.stderr | default(''))
+            | trim
+          )
+        ]
+      }}
+  when:
+    - openwrt_xp2p_three_x_ui_routing_state_healthcheck is defined
+    - openwrt_xp2p_three_x_ui_routing_state_healthcheck.rc | default(0) | int != 0
+
+- name: Check 3x-ui OpenWrt LAN intercept from optional LAN probe
+  ansible.builtin.raw: |
+    set -eu
+    fetch_url() {
+      url="$1"
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsS --connect-timeout 8 --max-time 30 "$url"
+      elif command -v wget >/dev/null 2>&1; then
+        wget -T 30 -qO- "$url"
+      else
+        echo "LAN_PROBE_NO_HTTP_CLIENT"
+        exit 1
+      fi
+    }
+    {% for check in openwrt_xp2p_three_x_ui_routing.socks_egress_checks %}
+    {% set expected_host = inventory_hostname if check.expected_public_ip_host | default("") == "self" else check.expected_public_ip_host | default("") %}
+    expected_egress_ip='{{ check.expected_public_ip | default((((management_generated_model.management_discovered | default({})).get(expected_host, {}).public.current_public_ip) | default(hostvars[expected_host].current_public_ip | default(""))) if expected_host | length > 0 else "") }}'
+    expected_country='{{ check.expected_country | default("") | upper }}'
+    forbidden_egress_ips="$(printf '%s\n' {% for ip in check.forbidden_public_ips | default([]) %}'{{ ip }}' {% endfor %}{% for host in check.forbidden_public_ip_hosts | default([]) %}{% set resolved_host = inventory_hostname if host == "self" else host %}'{{ ((management_generated_model.management_discovered | default({})).get(resolved_host, {}).public.current_public_ip) | default(hostvars[resolved_host].current_public_ip | default("")) }}' {% endfor %} | sed '/^$/d' | sort -u)"
+    test_name='{{ check.name | default(check.url) }}'
+    test_url='{{ check.url }}'
+    actual_egress_ip="$(fetch_url "$test_url" |
+      grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+    if [ -z "$actual_egress_ip" ]; then
+      echo "LAN_PROBE_EGRESS_IP_EMPTY check=$test_name url=$test_url"
+      exit 1
+    fi
+    if [ -n "$expected_egress_ip" ] && [ "$actual_egress_ip" != "$expected_egress_ip" ]; then
+      echo "LAN_PROBE_EGRESS_IP_MISMATCH check=$test_name url=$test_url expected=$expected_egress_ip actual=${actual_egress_ip:-<empty>}"
+      exit 1
+    fi
+    if [ -n "$forbidden_egress_ips" ] && printf '%s\n' "$forbidden_egress_ips" | grep -Fxq "$actual_egress_ip"; then
+      echo "LAN_PROBE_EGRESS_IP_FORBIDDEN check=$test_name url=$test_url actual=$actual_egress_ip forbidden=$(printf '%s' "$forbidden_egress_ips" | tr '\n' ',')"
+      exit 1
+    fi
+    if [ -n "$expected_country" ]; then
+      actual_country="$(fetch_url "https://ipapi.co/${actual_egress_ip}/country/" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z' | head -c 2 || true)"
+      if [ "$actual_country" != "$expected_country" ]; then
+        echo "LAN_PROBE_EGRESS_COUNTRY_MISMATCH check=$test_name url=$test_url expected_country=$expected_country actual_country=${actual_country:-<empty>} actual=$actual_egress_ip"
+        exit 1
+      fi
+    fi
+    {% endfor %}
+  register: openwrt_xp2p_three_x_ui_lan_probe_healthcheck
+  delegate_to: "{{ openwrt_xp2p_three_x_ui_routing.lan_probe.host }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - three_x_ui_lan_probe_enabled | default(false) | bool
+    - openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) | bool
+    - openwrt_xp2p_three_x_ui_routing.lan_probe.enabled | default(false) | bool
+    - openwrt_xp2p_three_x_ui_routing.lan_probe.host | default('') | length > 0
+
+- name: Record 3x-ui OpenWrt LAN probe healthcheck failure
+  ansible.builtin.set_fact:
+    three_x_ui_openwrt_healthcheck_failures: >-
+      {{
+        three_x_ui_openwrt_healthcheck_failures
+        + [
+          'LAN probe failed on ' ~ inventory_hostname ~
+          ' via ' ~ openwrt_xp2p_three_x_ui_routing.lan_probe.host ~
+          ': ' ~ (
+            openwrt_xp2p_three_x_ui_lan_probe_healthcheck.stdout
+            | default(openwrt_xp2p_three_x_ui_lan_probe_healthcheck.stderr | default(''))
+            | trim
+          )
+        ]
+      }}
+  when:
+    - openwrt_xp2p_three_x_ui_lan_probe_healthcheck is defined
+    - openwrt_xp2p_three_x_ui_lan_probe_healthcheck.rc | default(0) | int != 0
+
+- name: Check 3x-ui OpenWrt LAN intercept state
+  ansible.builtin.raw: |
+    set -eu
+    mark='{{ openwrt_xp2p_three_x_ui_routing.intercept.fwmark | default("0x66") }}'
+    table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default("100") }}'
+    xp2pc_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default("xp2pc") }}'
+    firewall_rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.firewall_rule_section | default("xp2pc_lan_intercept_mark") }}'
+    private_set_name="${firewall_rule_name}_private"
+    intercept_mode='{{ openwrt_xp2p_three_x_ui_routing.intercept.mode | default("web") }}'
+    rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default("xp2pc_lan_intercept") }}'
+    route_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default("xp2pc_lan_intercept_default") }}'
+    test "$(uci -q get "firewall.${private_set_name}")" = ipset
+    test "$(uci -q get "firewall.${private_set_name}.name")" = "$private_set_name"
+    test "$(uci -q get "firewall.${private_set_name}.match")" = dest_net
+    for cidr in {% for cidr in openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"]) %}'{{ cidr }}' {% endfor %}; do
+      uci -q get "firewall.${private_set_name}.entry" | tr ' ' '\n' | grep -Fx "$cidr" >/dev/null
+    done
+    check_source_exclusions() {
+      section="$1"
+      test "$(uci -q get "firewall.${section}.extra" 2>/dev/null || true)" = ""
+      expected_src_ips="$(printf '%s\n' {% for source in openwrt_xp2p_three_x_ui_routing.intercept.source_exclusions | default([]) %}'!{{ source }}' {% endfor %} | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      actual_src_ips="$( (uci -q get "firewall.${section}.src_ip" 2>/dev/null || true) | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      if [ "$actual_src_ips" != "$expected_src_ips" ]; then
+        echo "LAN_INTERCEPT_SOURCE_EXCLUSIONS_MISMATCH section=${section} expected=${expected_src_ips:-<empty>} actual=${actual_src_ips:-<empty>}"
+        exit 1
+      fi
+    }
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp")" = rule
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.src")" = lan
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.dest")" = "*"
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.proto")" = tcp
+    if [ "$intercept_mode" = full ]; then
+      ! uci -q get "firewall.${firewall_rule_name}_tcp.dest_port" >/dev/null 2>&1
+      test "$(uci -q get "firewall.${firewall_rule_name}_tcp.name")" = "XP2PC LAN intercept mark TCP full"
+    else
+      test "$(uci -q get "firewall.${firewall_rule_name}_tcp.dest_port")" = "80 443"
+      test "$(uci -q get "firewall.${firewall_rule_name}_tcp.name")" = "XP2PC LAN intercept mark TCP 80 443"
+    fi
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.ipset")" = "!${private_set_name} dest"
+    check_source_exclusions "${firewall_rule_name}_tcp"
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.target")" = MARK
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.set_mark")" = "$mark"
+    test "$(uci -q get "firewall.${firewall_rule_name}_tcp.enabled")" = "1"
+    tcp_disabled="$(uci -q get "firewall.${firewall_rule_name}_tcp.disabled" 2>/dev/null || true)"
+    if [ "$tcp_disabled" = "1" ] || [ "$tcp_disabled" = "true" ]; then
+      echo "LAN_INTERCEPT_FIREWALL_RULE_DISABLED section=${firewall_rule_name}_tcp"
+      exit 1
+    fi
+    check_udp_rule() {
+      udp_section="$1"
+      udp_port="$2"
+      test "$(uci -q get "firewall.${udp_section}")" = rule
+      test "$(uci -q get "firewall.${udp_section}.src")" = lan
+      test "$(uci -q get "firewall.${udp_section}.dest")" = "*"
+      test "$(uci -q get "firewall.${udp_section}.proto")" = udp
+      test "$(uci -q get "firewall.${udp_section}.dest_port")" = "$udp_port"
+      test "$(uci -q get "firewall.${udp_section}.ipset")" = "!${private_set_name} dest"
+      check_source_exclusions "$udp_section"
+      test "$(uci -q get "firewall.${udp_section}.target")" = MARK
+      test "$(uci -q get "firewall.${udp_section}.set_mark")" = "$mark"
+      test "$(uci -q get "firewall.${udp_section}.enabled")" = "1"
+      udp_disabled="$(uci -q get "firewall.${udp_section}.disabled" 2>/dev/null || true)"
+      if [ "$udp_disabled" = "1" ] || [ "$udp_disabled" = "true" ]; then
+        echo "LAN_INTERCEPT_FIREWALL_RULE_DISABLED section=${udp_section}"
+        exit 1
+      fi
+    }
+    if [ "$intercept_mode" = full ]; then
+      ! uci -q get "firewall.${firewall_rule_name}_udp" >/dev/null 2>&1
+      for udp_port in {% for port in openwrt_xp2p_three_x_ui_routing.intercept.udp_mark_ports | default(["1-52", "54-122", "124-65535"]) %}'{{ port }}' {% endfor %}; do
+        section_port="$(printf '%s\n' "$udp_port" | tr -c 'A-Za-z0-9_' '_')"
+        check_udp_rule "${firewall_rule_name}_udp_${section_port}" "$udp_port"
+      done
+      if nft -a list chain inet fw4 mangle_prerouting |
+        grep -E 'meta l4proto icmp|ip protocol icmp' |
+        grep -F "meta mark set $mark" >/dev/null; then
+          echo "LAN_INTERCEPT_ICMP_MARKED"
+          exit 1
+      fi
+    else
+      check_udp_rule "${firewall_rule_name}_udp" "443"
+    fi
+    ! uci show firewall 2>/dev/null | grep -F "xp2pc_lan_intercept.path=" >/dev/null
+    ! nft -a list chain inet fw4 mangle_prerouting | grep -F "zavodskaya-full-pilot" >/dev/null
+    test ! -e /etc/xp2p/xp2pc-lan-intercept.nft
+    test ! -e /etc/nftables.d/xp2pc-lan-intercept.nft
+    test "$(uci -q get "firewall.${xp2pc_if}")" = zone
+    test "$(uci -q get "firewall.${xp2pc_if}.name")" = "$xp2pc_if"
+    uci -q get "firewall.${xp2pc_if}.network" | tr ' ' '\n' | grep -Fx "$xp2pc_if" >/dev/null
+    uci show firewall 2>/dev/null | sed -n 's/^\(firewall\.[^=]*\)=forwarding$/\1/p' | while read -r forwarding_section; do
+      if [ "$(uci -q get "${forwarding_section}.src" 2>/dev/null || true)" = lan ] &&
+         [ "$(uci -q get "${forwarding_section}.dest" 2>/dev/null || true)" = "$xp2pc_if" ]; then
+        echo found
+        break
+      fi
+    done | grep -Fx found >/dev/null
+    test "$(uci -q get "network.${rule_name}")" = rule
+    test "$(uci -q get "network.${rule_name}.mark")" = "$mark/0xffffffff"
+    test "$(uci -q get "network.${rule_name}.lookup")" = "$table"
+    test "$(uci -q get "network.${route_name}")" = route
+    test "$(uci -q get "network.${route_name}.interface")" = "$xp2pc_if"
+    test "$(uci -q get "network.${route_name}.target")" = "0.0.0.0/0"
+    test "$(uci -q get "network.${route_name}.table")" = "$table"
+    uci show network | grep -F "interface='$xp2pc_if'" >/dev/null
+    rule_disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
+    route_disabled="$(uci -q get "network.${route_name}.disabled" 2>/dev/null || true)"
+    if [ "$rule_disabled" = "1" ] || [ "$rule_disabled" = "true" ]; then
+      echo "LAN_INTERCEPT_NETWORK_RULE_DISABLED section=${rule_name}"
+      exit 1
+    fi
+    if [ "$route_disabled" = "1" ] || [ "$route_disabled" = "true" ]; then
+      echo "LAN_INTERCEPT_NETWORK_ROUTE_DISABLED section=${route_name}"
+      exit 1
+    fi
+    ip link show "$xp2pc_if" >/dev/null 2>&1
+    ip route show table "$table" | grep -E '^default([[:space:]]|$)' | grep -F " dev ${xp2pc_if}" >/dev/null
+  register: openwrt_xp2p_three_x_ui_intercept_state_healthcheck
+  changed_when: false
+  failed_when: false
+  when:
+    - openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) | bool
+
+- name: Record 3x-ui OpenWrt LAN intercept state healthcheck failure
+  ansible.builtin.set_fact:
+    three_x_ui_openwrt_healthcheck_failures: >-
+      {{
+        three_x_ui_openwrt_healthcheck_failures
+        + [
+          'LAN intercept state failed on ' ~ inventory_hostname ~
+          ': ' ~ (
+            openwrt_xp2p_three_x_ui_intercept_state_healthcheck.stdout
+            | default(openwrt_xp2p_three_x_ui_intercept_state_healthcheck.stderr | default(''))
+            | trim
+          )
+        ]
+      }}
+  when:
+    - openwrt_xp2p_three_x_ui_intercept_state_healthcheck is defined
+    - openwrt_xp2p_three_x_ui_intercept_state_healthcheck.rc | default(0) | int != 0
+
+- name: Check 3x-ui OpenWrt LAN intercept failover state
+  ansible.builtin.raw: |
+    set -eu
+    script_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.script_path | default("/usr/local/sbin/xp2pc-lan-intercept-failover") }}'
+    service_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.service_path | default("/etc/init.d/xp2pc-lan-intercept-failover") }}'
+    instance_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.instance_name | default("xp2pc-lan-intercept-failover") }}'
+    rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default("xp2pc_lan_intercept") }}'
+    xp2pc_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default("xp2pc") }}'
+    table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default("100") }}'
+    outbound_tag='{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}'
+
+    test -x "$script_path"
+    test -x "$service_path"
+    "$service_path" enabled
+    "$service_path" running
+    logread 2>/dev/null | grep -F "$instance_name" >/dev/null
+
+    state="$(xp2p client state 2>/dev/null || true)"
+    disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
+    alive=false
+    dead=false
+
+    if ip link show "$xp2pc_if" >/dev/null 2>&1 &&
+       ip route show table "$table" 2>/dev/null | grep -E '^default([[:space:]]|$)' | grep -F " dev ${xp2pc_if}" >/dev/null &&
+       printf '%s\n' "$state" | grep -F "$outbound_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+      alive=true
+    elif ! ip link show "$xp2pc_if" >/dev/null 2>&1 ||
+         printf '%s\n' "$state" | grep -F "$outbound_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)' ||
+         ! printf '%s\n' "$state" | grep -F "$outbound_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+      dead=true
+    fi
+
+    if [ "$alive" = true ]; then
+      [ "$disabled" != "1" ] && [ "$disabled" != "true" ]
+    elif [ "$dead" = true ]; then
+      [ "$disabled" = "1" ] || [ "$disabled" = "true" ]
+    fi
+  register: openwrt_xp2p_three_x_ui_intercept_failover_healthcheck
+  changed_when: false
+  failed_when: false
+  when:
+    - openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) | bool
+    - openwrt_xp2p_three_x_ui_routing.intercept.failover.enabled | default(false) | bool
+
+- name: Record 3x-ui OpenWrt LAN intercept failover healthcheck failure
+  ansible.builtin.set_fact:
+    three_x_ui_openwrt_healthcheck_failures: >-
+      {{
+        three_x_ui_openwrt_healthcheck_failures
+        + [
+          'LAN intercept failover failed on ' ~ inventory_hostname ~
+          ': ' ~ (
+            openwrt_xp2p_three_x_ui_intercept_failover_healthcheck.stdout
+            | default(openwrt_xp2p_three_x_ui_intercept_failover_healthcheck.stderr | default(''))
+            | trim
+          )
+        ]
+      }}
+  when:
+    - openwrt_xp2p_three_x_ui_intercept_failover_healthcheck is defined
+    - openwrt_xp2p_three_x_ui_intercept_failover_healthcheck.rc | default(0) | int != 0
+
+- name: Check 3x-ui OpenWrt SOCKS egress
+  ansible.builtin.raw: |
+    set -eu
+    {% for check in openwrt_xp2p_three_x_ui_routing.socks_egress_checks %}
+    {% set expected_host = inventory_hostname if check.expected_public_ip_host | default("") == "self" else check.expected_public_ip_host | default("") %}
+    expected_egress_ip='{{ check.expected_public_ip | default((((management_generated_model.management_discovered | default({})).get(expected_host, {}).public.current_public_ip) | default(hostvars[expected_host].current_public_ip | default(""))) if expected_host | length > 0 else "") }}'
+    expected_country='{{ check.expected_country | default("") | upper }}'
+    forbidden_egress_ips="$(printf '%s\n' {% for ip in check.forbidden_public_ips | default([]) %}'{{ ip }}' {% endfor %}{% for host in check.forbidden_public_ip_hosts | default([]) %}{% set resolved_host = inventory_hostname if host == "self" else host %}'{{ ((management_generated_model.management_discovered | default({})).get(resolved_host, {}).public.current_public_ip) | default(hostvars[resolved_host].current_public_ip | default("")) }}' {% endfor %} | sed '/^$/d' | sort -u)"
+    test_name='{{ check.name | default(check.url) }}'
+    test_url='{{ check.url }}'
+    actual_egress_ip="$(curl --socks5-hostname 127.0.0.1:{{ openwrt_xp2p_three_x_ui_routing.socks_port | int }} \
+      -fsS --connect-timeout 8 --max-time 30 "$test_url" |
+      grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+    if [ -z "$actual_egress_ip" ]; then
+      echo "SOCKS_EGRESS_IP_EMPTY check=$test_name url=$test_url"
+      exit 1
+    fi
+    if [ -n "$expected_egress_ip" ] && [ "$actual_egress_ip" != "$expected_egress_ip" ]; then
+      echo "SOCKS_EGRESS_IP_MISMATCH check=$test_name url=$test_url expected=$expected_egress_ip actual=${actual_egress_ip:-<empty>}"
+      exit 1
+    fi
+    if [ -n "$forbidden_egress_ips" ] && printf '%s\n' "$forbidden_egress_ips" | grep -Fxq "$actual_egress_ip"; then
+      echo "SOCKS_EGRESS_IP_FORBIDDEN check=$test_name url=$test_url actual=$actual_egress_ip forbidden=$(printf '%s' "$forbidden_egress_ips" | tr '\n' ',')"
+      exit 1
+    fi
+    if [ -n "$expected_country" ]; then
+      actual_country="$(curl -fsS --connect-timeout 8 --max-time 30 "https://ipapi.co/${actual_egress_ip}/country/" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z' | head -c 2 || true)"
+      if [ "$actual_country" != "$expected_country" ]; then
+        echo "SOCKS_EGRESS_COUNTRY_MISMATCH check=$test_name url=$test_url expected_country=$expected_country actual_country=${actual_country:-<empty>} actual=$actual_egress_ip"
+        exit 1
+      fi
+    fi
+    {% endfor %}
+  register: openwrt_xp2p_three_x_ui_socks_egress_healthcheck
+  changed_when: false
+  failed_when: false
+
+- name: Record 3x-ui OpenWrt SOCKS egress healthcheck failure
+  ansible.builtin.set_fact:
+    three_x_ui_openwrt_healthcheck_failures: >-
+      {{
+        three_x_ui_openwrt_healthcheck_failures
+        + [
+          'SOCKS egress failed on ' ~ inventory_hostname ~
+          ': ' ~ (
+            openwrt_xp2p_three_x_ui_socks_egress_healthcheck.stdout
+            | default(openwrt_xp2p_three_x_ui_socks_egress_healthcheck.stderr | default(''))
+            | trim
+          )
+        ]
+      }}
+  when:
+    - openwrt_xp2p_three_x_ui_socks_egress_healthcheck is defined
+    - openwrt_xp2p_three_x_ui_socks_egress_healthcheck.rc | default(0) | int != 0

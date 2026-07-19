@@ -1,0 +1,153 @@
+---
+- name: Prepare 3x-ui OpenWrt routing context
+  ansible.builtin.include_tasks: context.yml
+
+- name: Prepare local 3x-ui OpenWrt routing dat cache
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_openwrt_dat_refresh
+    tasks_from: cache
+    apply:
+      delegate_to: localhost
+  vars:
+    xp2p_dat_refresh_model:
+      id: "{{ openwrt_xp2p_three_x_ui_routing_star.id }}"
+      remote_dat_dir: "{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}"
+      dat_files: "{{ openwrt_xp2p_three_x_ui_routing.dat_files }}"
+      dat_max_age_days: "{{ openwrt_xp2p_three_x_ui_routing.dat_max_age_days | default(openwrt_xp2p_three_x_ui_routing_dat_max_age_days) }}"
+      socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
+    xp2p_dat_refresh_cache_dir: "{{ openwrt_xp2p_three_x_ui_routing_cache_dir }}"
+    xp2p_dat_refresh_force: "{{ three_x_ui_openwrt_dat_refresh_force | default(false) }}"
+  run_once: true
+
+- name: Render 3x-ui OpenWrt routing template on control host
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../../{{ openwrt_xp2p_three_x_ui_routing.routing_template }}"
+    dest: "{{ openwrt_xp2p_three_x_ui_routing_cache_dir }}/{{ openwrt_xp2p_three_x_ui_routing_star.id }}/routing.rules.after-xp2p-managed.json"
+    mode: "0644"
+  vars:
+    three_x_ui_openwrt_routing_proxy_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}"
+    three_x_ui_openwrt_routing_final_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default('direct') }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check xp2p command on OpenWrt before routing apply
+  ansible.builtin.raw: command -v xp2p
+  register: openwrt_xp2p_three_x_ui_routing_xp2p_command
+  changed_when: false
+
+- name: Ensure 3x-ui OpenWrt routing directories exist
+  ansible.builtin.raw: |
+    mkdir -p '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}'
+  changed_when: false
+
+- name: Sync 3x-ui OpenWrt routing dat files
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_openwrt_dat_refresh
+    tasks_from: sync
+  vars:
+    xp2p_dat_refresh_model:
+      id: "{{ openwrt_xp2p_three_x_ui_routing_star.id }}"
+      remote_dat_dir: "{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}"
+      dat_files: "{{ openwrt_xp2p_three_x_ui_routing.dat_files }}"
+      dat_max_age_days: "{{ openwrt_xp2p_three_x_ui_routing.dat_max_age_days | default(openwrt_xp2p_three_x_ui_routing_dat_max_age_days) }}"
+      socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
+    xp2p_dat_refresh_cache_dir: "{{ openwrt_xp2p_three_x_ui_routing_cache_dir }}"
+    xp2p_dat_refresh_force: "{{ three_x_ui_openwrt_dat_refresh_force | default(false) }}"
+    xp2p_dat_refresh_max_age_days: "{{ three_x_ui_openwrt_dat_refresh_max_age_days | default(openwrt_xp2p_three_x_ui_routing_dat_max_age_days) }}"
+    xp2p_dat_refresh_scp_extra_args: "{{ openwrt_xp2p_three_x_ui_scp_extra_args }}"
+
+- name: Collect local 3x-ui OpenWrt routing template checksum
+  ansible.builtin.command:
+    argv:
+      - sha256sum
+      - "{{ openwrt_xp2p_three_x_ui_routing_cache_dir }}/{{ openwrt_xp2p_three_x_ui_routing_star.id }}/routing.rules.after-xp2p-managed.json"
+  register: openwrt_xp2p_three_x_ui_routing_local_template_checksum
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Collect remote 3x-ui OpenWrt routing template checksum
+  ansible.builtin.raw: |
+    test -f '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' &&
+      sha256sum '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' ||
+      true
+  register: openwrt_xp2p_three_x_ui_routing_remote_template_checksum
+  changed_when: false
+
+- name: Copy 3x-ui OpenWrt routing template to router
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['scp']
+        + openwrt_xp2p_three_x_ui_scp_extra_args
+        + ['-i', ansible_ssh_private_key_file, '-P', ansible_port | default(22) | string,
+           openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json',
+           ansible_user | default('root') ~ '@' ~ ansible_host ~ ':' ~ openwrt_xp2p_three_x_ui_routing.remote_config_dir ~ '/routing.rules.after-xp2p-managed.json']
+      }}
+  changed_when: true
+  when: >-
+    (
+      openwrt_xp2p_three_x_ui_routing_remote_template_checksum.stdout
+      | default('')
+      | regex_search('^[0-9a-fA-F]+')
+      | default('', true)
+    )
+    !=
+    (
+      openwrt_xp2p_three_x_ui_routing_local_template_checksum.stdout
+      | regex_search('^[0-9a-fA-F]+')
+    )
+  delegate_to: localhost
+
+- name: Validate remote 3x-ui OpenWrt routing files before service settle
+  ansible.builtin.raw: |
+    set -eu
+    for file in {% for dat_file in openwrt_xp2p_three_x_ui_routing.dat_files %}'{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ dat_file.name }}' {% endfor %}; do
+      test -s "$file"
+    done
+    test -s '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
+    grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
+  changed_when: false
+
+- name: Wait for xp2p watchdog to pick up routing template
+  ansible.builtin.pause:
+    seconds: "{{ openwrt_xp2p_three_x_ui_routing.settle_seconds | default(20) }}"
+
+- name: Run 3x-ui OpenWrt SOCKS smoke test
+  ansible.builtin.raw: |
+    curl --socks5-hostname 127.0.0.1:{{ openwrt_xp2p_three_x_ui_routing.socks_port | int }} \
+      -fsS --connect-timeout 3 --max-time 5 2ip.me
+  register: openwrt_xp2p_three_x_ui_routing_socks_smoke
+  changed_when: false
+
+- name: Apply 3x-ui OpenWrt LAN intercept and failover with rollback guard
+  block:
+    - name: Prepare rollback guard for 3x-ui OpenWrt LAN intercept and failover changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+
+    - name: Arm rollback guard before 3x-ui OpenWrt LAN intercept and failover changes
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+        tasks_from: arm
+
+    - name: Apply 3x-ui OpenWrt LAN intercept after successful SOCKS smoke test
+      ansible.builtin.include_tasks: intercept_apply.yml
+
+    - name: Install 3x-ui OpenWrt LAN intercept failover after intercept apply
+      ansible.builtin.include_tasks: intercept_failover.yml
+
+    - name: Reset SSH connection after 3x-ui OpenWrt LAN intercept and failover apply
+      ansible.builtin.meta: reset_connection
+
+    - name: Cancel rollback guard after successful 3x-ui OpenWrt LAN intercept and failover apply
+      ansible.builtin.include_role:
+        name: ansible_common.core.openwrt_rollback
+        tasks_from: cancel
+
+  rescue:
+    - name: Leave rollback guard armed after failed 3x-ui OpenWrt LAN intercept or failover apply
+      ansible.builtin.fail:
+        msg: "3x-ui OpenWrt LAN intercept or failover apply failed on {{ inventory_hostname }}; rollback guard remains armed."
+  when:
+    - openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) | bool

@@ -1,0 +1,13 @@
+---
+openwrt_xp2p_three_x_ui_routing_cache_dir: "{{ playbook_dir }}/../../.cache/three-x-ui-openwrt-routing"
+openwrt_xp2p_three_x_ui_routing_dat_max_age_seconds: 1209600
+openwrt_xp2p_three_x_ui_routing_dat_max_age_days: 14
+three_x_ui_openwrt_dat_refresh_force: false
+three_x_ui_openwrt_dat_refresh_max_age_days: 14
+three_x_ui_openwrt_dat_refresh_verify_socks: false
+three_x_ui_openwrt_dat_refresh_restart_xp2p: false
+three_x_ui_lan_probe_enabled: false
+openwrt_xp2p_three_x_ui_scp_extra_args:
+  - -O
+  - -o
+  - StrictHostKeyChecking=accept-new
