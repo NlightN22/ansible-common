@@ -77,7 +77,11 @@
         ]
       }}
   vars:
-    three_x_ui_hub_probe: "{{ hostvars[item.host].openwrt_reverse_probe | default({}) }}"
+    three_x_ui_hub_probe: >-
+      {{
+        three_x_ui_hub_star.openwrt_reverse_probe | default({})
+        | combine(item.openwrt_reverse_probe | default({}), recursive=True)
+      }}
     three_x_ui_hub_management_override: >-
       {{ three_x_ui_hub_management_model.management_overrides[item.host] | default({}) }}
     three_x_ui_hub_probe_host: >-
@@ -98,7 +102,8 @@
     - item.host in (groups.openwrt | default([]))
     - >-
       not (three_x_ui_hub_openwrt_reverse_probe_require_explicit | bool)
-      or hostvars[item.host].openwrt_reverse_probe is defined
+      or three_x_ui_hub_star.openwrt_reverse_probe is defined
+      or item.openwrt_reverse_probe is defined
     - three_x_ui_hub_probe.enabled | default(true) | bool
     - three_x_ui_hub_probe_host | length > 0
 

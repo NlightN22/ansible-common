@@ -54,4 +54,4 @@ three_x_ui_hub_local_socks:
   sniffing:
     enabled: false
 three_x_ui_hub_local_socks_probe_timeout: 10
-three_x_ui_hub_openwrt_reverse_probe_require_explicit: true
+three_x_ui_hub_openwrt_reverse_probe_require_explicit: false
