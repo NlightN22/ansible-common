@@ -14,16 +14,40 @@
     state: directory
     mode: "0755"
 
-- name: Download XP2P dat files to control host
-  ansible.builtin.get_url:
-    url: "{{ item.url }}"
-    dest: "{{ xp2p_dat_refresh_cache_dir }}/{{ xp2p_dat_refresh_model.id }}/{{ item.name }}"
-    mode: "0644"
-    timeout: 30
-    force: "{{ xp2p_dat_refresh_force | bool }}"
+- name: Collect local XP2P dat cache state
+  ansible.builtin.stat:
+    path: "{{ xp2p_dat_refresh_cache_dir }}/{{ xp2p_dat_refresh_model.id }}/{{ item.name }}"
+    get_checksum: false
+    get_mime: false
+  register: xp2p_dat_refresh_local_cache_before
   loop: "{{ xp2p_dat_refresh_model.dat_files }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: Download XP2P dat files to control host
+  ansible.builtin.get_url:
+    url: "{{ item.item.url }}"
+    dest: "{{ xp2p_dat_refresh_cache_dir }}/{{ xp2p_dat_refresh_model.id }}/{{ item.item.name }}"
+    mode: "0644"
+    timeout: 30
+    force: "{{ xp2p_dat_refresh_force | bool }}"
+  loop: "{{ xp2p_dat_refresh_local_cache_before.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  vars:
+    xp2p_dat_refresh_cache_max_age_seconds: >-
+      {{
+        (
+          xp2p_dat_refresh_model.dat_max_age_days
+          | default(xp2p_dat_refresh_max_age_days)
+          | int
+        ) * 86400
+      }}
+  when: >-
+    xp2p_dat_refresh_force | bool
+    or not item.stat.exists
+    or (item.stat.size | int) <= 0
+    or ((lookup('pipe', 'date +%s') | int) - (item.stat.mtime | int)) > (xp2p_dat_refresh_cache_max_age_seconds | int)
 
 - name: Validate local XP2P dat files
   ansible.builtin.stat:

@@ -140,6 +140,7 @@
     intercept_mode='{{ openwrt_xp2p_three_x_ui_routing.intercept.mode | default("web") }}'
     rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default("xp2pc_lan_intercept") }}'
     route_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default("xp2pc_lan_intercept_default") }}'
+    failover_enabled='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.enabled | default(false) | bool | lower }}'
     test "$(uci -q get "firewall.${private_set_name}")" = ipset
     test "$(uci -q get "firewall.${private_set_name}.name")" = "$private_set_name"
     test "$(uci -q get "firewall.${private_set_name}.match")" = dest_net
@@ -236,6 +237,9 @@
     rule_disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
     route_disabled="$(uci -q get "network.${route_name}.disabled" 2>/dev/null || true)"
     if [ "$rule_disabled" = "1" ] || [ "$rule_disabled" = "true" ]; then
+      if [ "$failover_enabled" = "true" ]; then
+        exit 0
+      fi
       echo "LAN_INTERCEPT_NETWORK_RULE_DISABLED section=${rule_name}"
       exit 1
     fi
@@ -302,9 +306,21 @@
     fi
 
     if [ "$alive" = true ]; then
-      [ "$disabled" != "1" ] && [ "$disabled" != "true" ]
+      if [ "$disabled" = "1" ] || [ "$disabled" = "true" ]; then
+        if logread 2>/dev/null | grep -F "$instance_name" | tail -20 | grep -F 'is alive; waiting ' >/dev/null; then
+          exit 0
+        fi
+        echo "LAN_INTERCEPT_FAILOVER_ALIVE_BUT_DISABLED section=${rule_name}"
+        exit 1
+      fi
     elif [ "$dead" = true ]; then
-      [ "$disabled" = "1" ] || [ "$disabled" = "true" ]
+      if [ "$disabled" != "1" ] && [ "$disabled" != "true" ]; then
+        echo "LAN_INTERCEPT_FAILOVER_DEAD_BUT_ENABLED section=${rule_name}"
+        exit 1
+      fi
+    else
+      echo "LAN_INTERCEPT_FAILOVER_STATE_INCONCLUSIVE outbound=${outbound_tag}"
+      exit 1
     fi
   register: openwrt_xp2p_three_x_ui_intercept_failover_healthcheck
   changed_when: false
@@ -341,10 +357,20 @@
     forbidden_egress_ips="$(printf '%s\n' {% for ip in check.forbidden_public_ips | default([]) %}'{{ ip }}' {% endfor %}{% for host in check.forbidden_public_ip_hosts | default([]) %}{% set resolved_host = inventory_hostname if host == "self" else host %}'{{ ((management_generated_model.management_discovered | default({})).get(resolved_host, {}).public.current_public_ip) | default(hostvars[resolved_host].current_public_ip | default("")) }}' {% endfor %} | sed '/^$/d' | sort -u)"
     test_name='{{ check.name | default(check.url) }}'
     test_url='{{ check.url }}'
-    actual_egress_ip="$(curl --socks5-hostname 127.0.0.1:{{ openwrt_xp2p_three_x_ui_routing.socks_port | int }} \
-      -fsS --connect-timeout 8 --max-time 30 "$test_url" |
-      grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+    actual_egress_ip=''
+    actual_egress_error=''
+    for attempt in 1 2 3; do
+      actual_egress_output="$(curl --socks5-hostname 127.0.0.1:{{ openwrt_xp2p_three_x_ui_routing.socks_port | int }} \
+        -fsS --connect-timeout 8 --max-time 30 "$test_url" 2>&1)" || actual_egress_error="$actual_egress_output"
+      actual_egress_ip="$(printf '%s\n' "$actual_egress_output" |
+        grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+      if [ -n "$actual_egress_ip" ]; then
+        break
+      fi
+      sleep 2
+    done
     if [ -z "$actual_egress_ip" ]; then
+      [ -z "$actual_egress_error" ] || printf '%s\n' "$actual_egress_error"
       echo "SOCKS_EGRESS_IP_EMPTY check=$test_name url=$test_url"
       exit 1
     fi
