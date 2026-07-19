@@ -1,0 +1,26 @@
+---
+- name: Sync XP2P dat files to OpenWrt
+  ansible.builtin.include_tasks: sync.yml
+
+- name: Run optional XP2P SOCKS smoke test after dat refresh
+  ansible.builtin.raw: |
+    curl --socks5-hostname 127.0.0.1:{{ xp2p_dat_refresh_model.socks_port | int }} \
+      -fsS --connect-timeout 3 --max-time 5 2ip.me
+  register: xp2p_dat_refresh_socks_smoke
+  changed_when: false
+  failed_when: false
+  when: xp2p_dat_refresh_verify_socks | bool
+
+- name: Report failed XP2P SOCKS smoke test after dat refresh
+  ansible.builtin.fail:
+    msg: >-
+      XP2P dat refresh completed, but runtime tunnel verification failed on
+      {{ inventory_hostname }} via SOCKS port {{ xp2p_dat_refresh_model.socks_port | int }}.
+      No dat rollback or service reload was attempted.
+  when:
+    - xp2p_dat_refresh_verify_socks | bool
+    - xp2p_dat_refresh_socks_smoke.rc | default(0) | int != 0
+
+- name: Restart XP2P service after explicit dat refresh request
+  ansible.builtin.raw: "/etc/init.d/{{ xp2p_dat_refresh_service_name }} restart"
+  when: xp2p_dat_refresh_restart_service | bool

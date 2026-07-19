@@ -1,0 +1,11 @@
+---
+xp2p_dat_refresh_cache_dir: "{{ playbook_dir }}/../../.cache/xp2p-dat-refresh"
+xp2p_dat_refresh_force: false
+xp2p_dat_refresh_max_age_days: 14
+xp2p_dat_refresh_verify_socks: false
+xp2p_dat_refresh_restart_service: false
+xp2p_dat_refresh_service_name: xp2p-client
+xp2p_dat_refresh_scp_extra_args:
+  - -O
+  - -o
+  - StrictHostKeyChecking=accept-new

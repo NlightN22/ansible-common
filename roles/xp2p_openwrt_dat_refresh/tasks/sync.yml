@@ -1,0 +1,89 @@
+---
+- name: Validate XP2P dat refresh sync model
+  ansible.builtin.assert:
+    that:
+      - xp2p_dat_refresh_model.id | default('') | length > 0
+      - xp2p_dat_refresh_model.remote_dat_dir | default('') | length > 0
+      - xp2p_dat_refresh_model.dat_files | default([]) | length > 0
+    fail_msg: "XP2P dat refresh model must define id, remote_dat_dir, and dat_files."
+    quiet: true
+
+- name: Collect local XP2P dat file state
+  ansible.builtin.stat:
+    path: "{{ xp2p_dat_refresh_cache_dir }}/{{ xp2p_dat_refresh_model.id }}/{{ item.name }}"
+    get_checksum: false
+    get_mime: false
+  register: xp2p_dat_refresh_local_dat_sync
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Require non-empty cached XP2P dat files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.size | int > 0
+    fail_msg: "Cached XP2P dat file {{ item.item.name }} is missing or empty."
+    quiet: true
+  loop: "{{ xp2p_dat_refresh_local_dat_sync.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  run_once: true
+
+- name: Ensure remote XP2P dat directory exists
+  ansible.builtin.raw: "mkdir -p '{{ xp2p_dat_refresh_model.remote_dat_dir }}'"
+  changed_when: false
+
+- name: Collect remote XP2P dat file state
+  ansible.builtin.raw: >-
+    stat -c '%s %Y' '{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}' 2>/dev/null || true
+  register: xp2p_dat_refresh_remote_dat_sync
+  changed_when: false
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Copy changed or stale XP2P dat files to router
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['scp']
+        + xp2p_dat_refresh_scp_extra_args
+        + (
+            (ansible_ssh_private_key_file | default('') | length > 0)
+            | ternary(['-i', ansible_ssh_private_key_file], [])
+          )
+        + ['-P', ansible_port | default(22) | string,
+           xp2p_dat_refresh_cache_dir ~ '/' ~ xp2p_dat_refresh_model.id ~ '/' ~ item.name,
+           (ansible_user | default('root')) ~ '@' ~ (ansible_host | default(inventory_hostname)) ~ ':' ~ xp2p_dat_refresh_model.remote_dat_dir ~ '/' ~ item.name]
+      }}
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    index_var: xp2p_dat_refresh_dat_index
+    label: "{{ item.name }}"
+  vars:
+    xp2p_dat_refresh_remote_parts: "{{ xp2p_dat_refresh_remote_dat_sync.results[xp2p_dat_refresh_dat_index].stdout.split() }}"
+    xp2p_dat_refresh_max_age_seconds: >-
+      {{
+        (
+          xp2p_dat_refresh_model.dat_max_age_days
+          | default(xp2p_dat_refresh_max_age_days)
+          | int
+        ) * 86400
+      }}
+  changed_when: true
+  delegate_to: localhost
+  when: >-
+    xp2p_dat_refresh_force | bool
+    or (xp2p_dat_refresh_remote_parts | length) < 2
+    or (xp2p_dat_refresh_remote_parts[0] | int) <= 0
+    or ((lookup('pipe', 'date +%s') | int) - (xp2p_dat_refresh_remote_parts[1] | int)) > (xp2p_dat_refresh_max_age_seconds | int)
+
+- name: Validate remote XP2P dat files
+  ansible.builtin.raw: "test -s '{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}'"
+  changed_when: false
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    label: "{{ item.name }}"
