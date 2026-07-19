@@ -1,0 +1,13 @@
+---
+- name: Run XP2P client endpoint healthcheck
+  ansible.builtin.include_tasks: healthcheck.yml
+  when: xp2p_client_endpoints_operation == 'healthcheck'
+
+- name: Apply XP2P client endpoint state
+  ansible.builtin.include_tasks: apply.yml
+  when: xp2p_client_endpoints_operation == 'apply'
+
+- name: Reject unsupported XP2P client endpoint operation
+  ansible.builtin.fail:
+    msg: "Unsupported XP2P client endpoint operation: {{ xp2p_client_endpoints_operation }}."
+  when: xp2p_client_endpoints_operation not in ['healthcheck', 'apply']

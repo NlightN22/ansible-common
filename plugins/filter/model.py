@@ -9,6 +9,8 @@ from typing import Any
 from ansible.errors import AnsibleFilterError
 from ansible_collections.ansible_common.core.plugins.module_utils.xp2p_model import (
     architecture_xp2p_view,
+    xp2p_client_endpoint_intents,
+    xp2p_client_endpoint_tags,
 )
 
 
@@ -117,6 +119,8 @@ def _add_star_network(
 ) -> None:
     network_id = str(source.get(id_field) or source.get("name") or network_type)
     source_hub = source.get("hub")
+    if not isinstance(source_hub, dict) and source.get("hub_host"):
+        source_hub = {"host": source.get("hub_host")}
     if not isinstance(source_hub, dict):
         raise AnsibleFilterError(f"{network_type} network {network_id!r} must define hub as a mapping")
     hub = source_hub.get("host")
@@ -443,5 +447,7 @@ class FilterModule(object):
             "architecture_network_member": architecture_network_member,
             "architecture_wireguard_view": architecture_wireguard_view,
             "architecture_xp2p_view": architecture_xp2p_view,
+            "xp2p_client_endpoint_intents": xp2p_client_endpoint_intents,
+            "xp2p_client_endpoint_tags": xp2p_client_endpoint_tags,
             "architecture_extension": architecture_extension,
         }

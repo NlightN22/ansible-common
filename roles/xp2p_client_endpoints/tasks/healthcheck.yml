@@ -1,0 +1,27 @@
+---
+- name: Select expected XP2P client endpoint tags
+  ansible.builtin.set_fact:
+    xp2p_client_endpoint_expected_tags: "{{ xp2p_client_endpoints | ansible_common.core.xp2p_client_endpoint_tags }}"
+
+- name: Collect xp2p client endpoints
+  ansible.builtin.raw: xp2p client list
+  register: xp2p_client_endpoint_list
+  changed_when: false
+  no_log: true
+
+- name: Build missing XP2P client endpoint tags
+  ansible.builtin.set_fact:
+    xp2p_client_endpoint_missing_tags: >-
+      {{
+        xp2p_client_endpoint_expected_tags
+        | reject('in', xp2p_client_endpoint_list.stdout)
+        | list
+      }}
+
+- name: Validate declared XP2P client endpoints are present
+  ansible.builtin.assert:
+    that:
+      - xp2p_client_endpoint_missing_tags | length == 0
+    fail_msg: >-
+      Declared XP2P client endpoints are missing on {{ inventory_hostname }}:
+      {{ xp2p_client_endpoint_missing_tags | join(', ') }}.

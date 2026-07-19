@@ -31,51 +31,53 @@ class XP2PModelTests(unittest.TestCase):
         self.model = {
             "nodes": {},
             "networks": {
-                "in1": {
-                    "id": "in1",
+                "relay-a": {
+                    "id": "relay-a",
                     "type": "xp2p",
-                    "hub": "in1.komponent-m.ru",
-                    "server": "in1.komponent-m.ru",
-                    "endpoint_name": "in1-komponent-m-ru",
+                    "hub": "relay-a.example.test",
+                    "server": "relay-a.example.test",
+                    "endpoint_name": "relay-a-example-test",
+                    "endpoint_port": 443,
+                    "outbound_tag": "proxy-relay-a-example-test",
                     "source": {
-                        "id": "in1",
-                        "endpoint_name": "in1-komponent-m-ru",
-                        "wireguard_transport_site_ids": ["komponent", "zamena"],
+                        "id": "relay-a",
+                        "endpoint_name": "relay-a-example-test",
+                        "wireguard_transport_site_ids": ["site-a", "site-b"],
                     },
                     "peers": {
-                        "AB-Zavodskaya": {
-                            "host": "AB-Zavodskaya",
-                            "user": "ab-zavodskaya",
+                        "edge-a": {
+                            "host": "edge-a",
+                            "user": "edge-a",
                         },
-                        "AB-Gagarina": {
-                            "host": "AB-Gagarina",
-                            "user": "ab-gagarina",
+                        "edge-b": {
+                            "host": "edge-b",
+                            "user": "edge-b",
                         },
-                        "ad.zamena.local": {
-                            "host": "ad.zamena.local",
-                            "user": "ad-zamena-org",
+                        "directory-a": {
+                            "host": "directory-a",
+                            "user": "directory-a",
                         },
                     },
                 },
-                "komponent": {
-                    "id": "komponent",
+                "site-a": {
+                    "id": "site-a",
                     "type": "wireguard",
-                    "hub": "AB-Zavodskaya",
-                    "hub_host": "AB-Zavodskaya",
+                    "hub": "edge-a",
+                    "hub_host": "edge-a",
                     "preferred_transport": {
                         "type": "xp2p",
-                        "star": "in1",
+                        "star": "relay-a",
                         "routed_cidrs": ["91.219.98.150/32"],
                     },
                 },
-                "zamena": {
-                    "id": "zamena",
+                "site-b": {
+                    "id": "site-b",
                     "type": "wireguard",
-                    "hub": "ad.zamena.local",
-                    "hub_host": "ad.zamena.local",
+                    "hub": "directory-a",
+                    "hub_host": "directory-a",
                     "preferred_transport": {
                         "type": "xp2p",
-                        "star": "in1",
+                        "star": "relay-a",
                         "routed_cidrs": ["185.221.214.189/32"],
                     },
                 },
@@ -83,7 +85,7 @@ class XP2PModelTests(unittest.TestCase):
         }
 
     def test_non_hub_clients_route_wireguard_endpoint_through_xp2p(self) -> None:
-        view = self.module.architecture_xp2p_view(self.model, "in1", "AB-Gagarina")
+        view = self.module.architecture_xp2p_view(self.model, "relay-a", "edge-b")
 
         self.assertEqual(
             redirect_cidrs(view),
@@ -91,22 +93,74 @@ class XP2PModelTests(unittest.TestCase):
         )
 
     def test_wireguard_hub_does_not_route_own_public_endpoint_through_xp2p(self) -> None:
-        view = self.module.architecture_xp2p_view(self.model, "in1", "AB-Zavodskaya")
+        view = self.module.architecture_xp2p_view(self.model, "relay-a", "edge-a")
 
         self.assertEqual(redirect_cidrs(view), {"185.221.214.189/32"})
 
     def test_server_reverse_redirect_points_wireguard_endpoint_to_hub_client(self) -> None:
-        view = self.module.architecture_xp2p_view(self.model, "in1", "in1.komponent-m.ru")
+        view = self.module.architecture_xp2p_view(self.model, "relay-a", "relay-a.example.test")
 
         redirects = server_redirects_by_cidr(view)
         self.assertEqual(
             redirects["91.219.98.150/32"],
             {
                 "cidr": "91.219.98.150/32",
-                "host": "in1-komponent-m-ru",
-                "tag": "ab-zavodskayain1-komponent-m-ru.rev",
+                "host": "relay-a-example-test",
+                "tag": "edge-arelay-a-example-test.rev",
             },
         )
+
+    def test_client_endpoint_intents_include_xp2p_and_three_x_ui_sources(self) -> None:
+        architecture_model = {
+            "networks": {
+                "relay-a": self.model["networks"]["relay-a"],
+                "overlay-a": {
+                    "id": "overlay-a",
+                    "type": "xray_overlay",
+                    "hub": "overlay-a.example.test",
+                    "source": {
+                        "id": "overlay-a",
+                        "panel": {"protocol": "trojan"},
+                        "endpoint": {
+                            "host": "overlay-a.example.test",
+                            "port": 443,
+                            "sni": "overlay-a.example.test",
+                        },
+                    },
+                    "peers": {
+                        "edge-a": {
+                            "host": "edge-a",
+                            "email": "edge-a",
+                            "state": "present",
+                        },
+                    },
+                },
+            },
+        }
+
+        intents = self.module.xp2p_client_endpoint_intents(architecture_model, "edge-a")
+
+        self.assertEqual(
+            {intent["source"]: intent["tag"] for intent in intents},
+            {
+                "xp2p:relay-a": "proxy-relay-a-example-test",
+                "three_x_ui:overlay-a": "proxy-overlay-a-example-test",
+            },
+        )
+        self.assertEqual(
+            self.module.xp2p_client_endpoint_tags(intents),
+            ["proxy-overlay-a-example-test", "proxy-relay-a-example-test"],
+        )
+
+    def test_single_source_apply_role_preserves_sibling_endpoints(self) -> None:
+        role_path = MODULE_PATH.parents[2] / "roles" / "xp2p_client_endpoints" / "tasks" / "apply.yml"
+        apply_tasks = role_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("xp2p client install --force", apply_tasks)
+        self.assertNotIn("xp2p client remove --all", apply_tasks)
+        self.assertNotIn("--force", apply_tasks)
+        self.assertNotIn("--all", apply_tasks)
+        self.assertIn("xp2p client remove '{{ item.item.tag }}' --quiet", apply_tasks)
 
 
 if __name__ == "__main__":

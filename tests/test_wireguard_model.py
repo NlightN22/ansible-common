@@ -73,6 +73,24 @@ class WireGuardModelTests(unittest.TestCase):
 
         self.assertEqual(peers[0]["allowed_ips"], ["198.51.100.1/32"])
 
+    def test_three_x_ui_star_can_use_hub_host_as_generic_hub(self) -> None:
+        fragment = {
+            "three_x_ui_star": {
+                "id": "overlay-a",
+                "hub_host": "overlay-a.example.test",
+                "endpoint": {"host": "overlay-a.example.test", "port": 443, "sni": "overlay-a.example.test"},
+                "panel": {"protocol": "trojan"},
+                "clients": [{"host": "router1", "email": "router1"}],
+            }
+        }
+
+        normalized = self.module.architecture_model_from_fragments([fragment])
+        normalized = self.module.architecture_normalize(normalized)
+        network = normalized["networks"]["overlay-a"]
+
+        self.assertEqual(network["type"], "xray_overlay")
+        self.assertEqual(network["hub"], "overlay-a.example.test")
+
 
 if __name__ == "__main__":
     unittest.main()

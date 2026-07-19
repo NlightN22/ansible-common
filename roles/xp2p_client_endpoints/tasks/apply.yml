@@ -1,0 +1,119 @@
+---
+- name: Validate XP2P client endpoint intents
+  ansible.builtin.assert:
+    that:
+      - xp2p_client_endpoints | length > 0
+      - xp2p_client_endpoints | selectattr('tag', 'defined') | list | length == xp2p_client_endpoints | length
+      - xp2p_client_endpoints | selectattr('source', 'defined') | list | length == xp2p_client_endpoints | length
+      - xp2p_client_endpoints | selectattr('state', 'defined') | list | length == xp2p_client_endpoints | length
+    fail_msg: "XP2P client endpoint apply requires normalized endpoint intents."
+
+- name: Check xp2p command
+  ansible.builtin.raw: command -v xp2p
+  register: xp2p_client_endpoint_command
+  changed_when: false
+
+- name: Collect current xp2p client endpoints before apply
+  ansible.builtin.raw: xp2p client list
+  register: xp2p_client_endpoint_list_before
+  changed_when: false
+  no_log: true
+
+- name: Remove model-owned absent XP2P client endpoints
+  ansible.builtin.raw: >-
+    xp2p client remove '{{ item.tag }}' --quiet
+  loop: "{{ xp2p_client_endpoints | selectattr('state', 'equalto', 'absent') | list }}"
+  loop_control:
+    label: "{{ item.source }} {{ item.tag }}"
+  register: xp2p_client_endpoint_absent_remove
+  changed_when: xp2p_client_endpoint_absent_remove.rc == 0
+  failed_when: false
+  when: item.tag in xp2p_client_endpoint_list_before.stdout
+
+- name: Check current present XP2P client endpoint identities
+  ansible.builtin.raw: >-
+    xp2p client list |
+    grep -F -- '{{ item.tag }}' |
+    grep -F -- '{{ item.user }}'
+  loop: "{{ xp2p_client_endpoints | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    label: "{{ item.source }} {{ item.tag }}"
+  register: xp2p_client_endpoint_identity_checks
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Build XP2P client endpoint replacement list
+  ansible.builtin.set_fact:
+    xp2p_client_endpoint_replacements: >-
+      {{
+        xp2p_client_endpoint_replacements | default([])
+        + [item.item]
+      }}
+  loop: "{{ xp2p_client_endpoint_identity_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.source }} {{ item.item.tag }}"
+  when: item.rc != 0
+  no_log: true
+
+- name: Install missing XP2P client endpoints additively
+  ansible.builtin.raw: >-
+    xp2p client install
+    {% if item.link is defined %}-L '{{ item.link }}'
+    {% else %}-H '{{ item.host }}' -P '{{ item.port }}' -u '{{ item.user }}' -w '{{ item.password }}' -s '{{ item.sni | default(item.server_name) }}'
+    {% endif %}
+  loop: "{{ xp2p_client_endpoint_replacements | default([]) }}"
+  loop_control:
+    label: "{{ item.source }} {{ item.tag }}"
+  register: xp2p_client_endpoint_additive_installs
+  changed_when: xp2p_client_endpoint_additive_installs.rc == 0
+  failed_when: false
+  no_log: true
+
+- name: Remove model-owned XP2P client endpoint before explicit replacement
+  ansible.builtin.raw: >-
+    xp2p client remove '{{ item.item.tag }}' --quiet
+  loop: "{{ xp2p_client_endpoint_additive_installs.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.source }} {{ item.item.tag }}"
+  register: xp2p_client_endpoint_replace_removes
+  changed_when: xp2p_client_endpoint_replace_removes.rc == 0
+  when:
+    - item.rc != 0
+    - item.item.tag in xp2p_client_endpoint_list_before.stdout
+
+- name: Reinstall XP2P client endpoint after explicit replacement
+  ansible.builtin.raw: >-
+    xp2p client install
+    {% if item.item.item.link is defined %}-L '{{ item.item.item.link }}'
+    {% else %}-H '{{ item.item.item.host }}' -P '{{ item.item.item.port }}' -u '{{ item.item.item.user }}' -w '{{ item.item.item.password }}' -s '{{ item.item.item.sni | default(item.item.item.server_name) }}'
+    {% endif %}
+  loop: "{{ xp2p_client_endpoint_replace_removes.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.source }} {{ item.item.item.tag }}"
+  register: xp2p_client_endpoint_reinstalls
+  changed_when: xp2p_client_endpoint_reinstalls.rc == 0
+  when: item is changed
+  no_log: true
+
+- name: Validate XP2P client endpoint apply command results
+  ansible.builtin.assert:
+    that:
+      - >-
+        xp2p_client_endpoint_additive_installs.results | default([])
+        | selectattr('rc', 'ne', 0)
+        | rejectattr('item.tag', 'in', xp2p_client_endpoint_list_before.stdout)
+        | list
+        | length == 0
+    fail_msg: "XP2P client endpoint additive install failed for at least one missing endpoint."
+
+- name: Wait for xp2p client endpoint config watcher to settle
+  ansible.builtin.pause:
+    seconds: "{{ xp2p_client_endpoints_settle_seconds }}"
+  when: >-
+    xp2p_client_endpoint_absent_remove is changed
+    or xp2p_client_endpoint_additive_installs is changed
+    or xp2p_client_endpoint_reinstalls is changed
+
+- name: Run XP2P client endpoint healthcheck after apply
+  ansible.builtin.include_tasks: healthcheck.yml

@@ -107,6 +107,112 @@ def _server_host(source: dict[str, Any], hub: Any) -> Any:
     return source.get("server_host") or hub
 
 
+def _endpoint_tag(host: Any) -> str:
+    return f"proxy-{_slug(host)}"
+
+
+def _first_member_for_host(members: Any, node_id: str) -> dict[str, Any] | None:
+    for member_id, member in _mapping_from_peer_list(members).items():
+        if not isinstance(member, dict):
+            member = {"id": member_id, "host": member_id}
+        if member_id == node_id or member.get("host") == node_id:
+            return _deep_merge({"id": member_id, "host": member.get("host", member_id)}, member)
+    return None
+
+
+def _endpoint_intent_from_xp2p(network_id: str, network: dict[str, Any], node_id: str) -> dict[str, Any] | None:
+    client = _first_member_for_host(network.get("peers", network.get("clients", [])), node_id)
+    if client is None:
+        return None
+    source = network.get("source", {})
+    if not isinstance(source, dict):
+        source = {}
+    host = network.get("endpoint_host") or source.get("endpoint_host") or network.get("server") or network.get("hub")
+    tag = network.get("outbound_tag") or source.get("outbound_tag") or _endpoint_tag(network.get("endpoint_name") or host)
+    return {
+        "tag": tag,
+        "host": host,
+        "port": network.get("endpoint_port") or source.get("endpoint_port"),
+        "server_name": network.get("server_name") or source.get("server_name") or network.get("endpoint_name") or host,
+        "sni": network.get("server_name") or source.get("server_name") or network.get("endpoint_name") or host,
+        "user": client.get("user") or client.get("email") or client.get("id") or client.get("host"),
+        "protocol": network.get("protocol") or source.get("protocol") or "trojan",
+        "source": f"xp2p:{network_id}",
+        "state": client.get("state", "present"),
+    }
+
+
+def _endpoint_intent_from_xray_overlay(network_id: str, network: dict[str, Any], node_id: str) -> dict[str, Any] | None:
+    client = _first_member_for_host(network.get("peers", network.get("clients", [])), node_id)
+    if client is None:
+        return None
+    source = network.get("source", {})
+    if not isinstance(source, dict):
+        source = {}
+    endpoint = network.get("endpoint") if isinstance(network.get("endpoint"), dict) else source.get("endpoint", {})
+    if not isinstance(endpoint, dict):
+        endpoint = {}
+    panel = network.get("panel") if isinstance(network.get("panel"), dict) else source.get("panel", {})
+    if not isinstance(panel, dict):
+        panel = {}
+    host = endpoint.get("host")
+    return {
+        "tag": network.get("outbound_tag") or source.get("outbound_tag") or _endpoint_tag(host),
+        "host": host,
+        "port": endpoint.get("port"),
+        "server_name": endpoint.get("server_name") or endpoint.get("sni") or host,
+        "sni": endpoint.get("sni") or endpoint.get("server_name") or host,
+        "user": client.get("user") or client.get("email") or client.get("id") or client.get("host"),
+        "protocol": panel.get("protocol") or network.get("protocol") or source.get("protocol") or "trojan",
+        "source": f"three_x_ui:{network_id}",
+        "state": client.get("state", "present"),
+    }
+
+
+def xp2p_client_endpoint_intents(model: dict[str, Any], node_id: str) -> list[dict[str, Any]]:
+    """Build normalized desired xp2p client endpoints for one host."""
+    model = _as_mapping(model, "architecture_model")
+    networks = model.get("networks", {})
+    if not isinstance(networks, dict):
+        raise AnsibleFilterError("architecture_model.networks must be a mapping")
+
+    intents = []
+    for network_id, network in networks.items():
+        if not isinstance(network, dict):
+            continue
+        network_type = network.get("type")
+        if network_type == "xp2p":
+            intent = _endpoint_intent_from_xp2p(str(network_id), network, node_id)
+        elif network_type == "xray_overlay":
+            intent = _endpoint_intent_from_xray_overlay(str(network_id), network, node_id)
+        else:
+            intent = None
+        if intent is None:
+            continue
+        missing = [field for field in ("tag", "host", "port", "user", "protocol", "source", "state") if not intent.get(field)]
+        if missing:
+            raise AnsibleFilterError(
+                f"XP2P endpoint intent {intent.get('source', network_id)!r} for {node_id!r} is missing {', '.join(missing)}"
+            )
+        intents.append(intent)
+
+    return sorted(intents, key=lambda item: (str(item["source"]), str(item["tag"])))
+
+
+def xp2p_client_endpoint_tags(intents: Any, state: str = "present") -> list[str]:
+    if intents is None:
+        return []
+    if not isinstance(intents, list):
+        raise AnsibleFilterError("xp2p endpoint intents must be a list")
+    tags = []
+    for intent in intents:
+        if not isinstance(intent, dict):
+            raise AnsibleFilterError("each xp2p endpoint intent must be a mapping")
+        if intent.get("state", "present") == state and intent.get("tag"):
+            tags.append(str(intent["tag"]))
+    return sorted(set(tags))
+
+
 def _host_id(value: Any) -> str | None:
     if isinstance(value, str) and value:
         return value

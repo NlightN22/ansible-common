@@ -1,0 +1,4 @@
+---
+xp2p_client_endpoints_operation: healthcheck
+xp2p_client_endpoints: "{{ resolved_xp2p_client_endpoints | default([]) }}"
+xp2p_client_endpoints_settle_seconds: 15
