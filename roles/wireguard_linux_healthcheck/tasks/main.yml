@@ -6,7 +6,7 @@
       - resolved_wireguard_network.current_member is mapping
       - not (wireguard_linux_healthcheck_require_hub_role | bool) or resolved_wireguard_network.current_member.role | default('spoke') == 'hub'
       - resolved_wireguard_network.interface_name is defined
-    fail_msg: "Linux WireGuard healthcheck requires the selected WireGuard hub member."
+    fail_msg: "Linux WireGuard healthcheck requires a selected WireGuard member."
 
 - name: Select Linux WireGuard expected runtime contract
   ansible.builtin.set_fact:

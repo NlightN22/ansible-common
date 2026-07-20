@@ -1,0 +1,20 @@
+# Managed by Ansible. Source: roles/wireguard_linux_apply/templates/linux-wireguard-spoke.conf.j2
+
+[Interface]
+PrivateKey = {{ linux_wireguard_member.private_key }}
+Address = {{ linux_wireguard_member.address }}
+Table = off
+{% if linux_wireguard_member.listen_port is defined %}
+ListenPort = {{ linux_wireguard_member.listen_port }}
+{% endif %}
+{% for route_target in linux_wireguard_expected_route_targets %}
+PostUp = ip route replace {{ route_target }} dev %i
+PostDown = ip route show {{ route_target }} dev %i | grep -q . && ip route delete {{ route_target }} dev %i || true
+{% endfor %}
+
+[Peer]
+# {{ resolved_wireguard_network.hub_member.name | default(resolved_wireguard_network.hub_member.host) }}
+PublicKey = {{ resolved_wireguard_network.hub_member.public_key }}
+Endpoint = {{ linux_wireguard_site.endpoint.host }}:{{ linux_wireguard_site.endpoint.port | default(linux_wireguard_site.listen_port) }}
+AllowedIPs = {{ linux_wireguard_site.hub_allowed_ips | join(', ') }}
+PersistentKeepalive = {{ linux_wireguard_member.persistent_keepalive | default(25) }}
