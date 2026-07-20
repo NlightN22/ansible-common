@@ -143,7 +143,7 @@
     test "$(uci -q get "firewall.${private_set_name}")" = ipset
     test "$(uci -q get "firewall.${private_set_name}.name")" = "$private_set_name"
     test "$(uci -q get "firewall.${private_set_name}.match")" = dest_net
-    for cidr in {% for cidr in openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"]) %}'{{ cidr }}' {% endfor %}; do
+    for cidr in {% for cidr in ((openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) + (openwrt_xp2p_three_x_ui_routing.intercept.destination_exclusions | default([]))) %}'{{ cidr }}' {% endfor %}; do
       uci -q get "firewall.${private_set_name}.entry" | tr ' ' '\n' | grep -Fx "$cidr" >/dev/null
     done
     check_source_exclusions() {
