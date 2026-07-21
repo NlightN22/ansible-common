@@ -32,12 +32,6 @@
   register: xp2p_client_state
   changed_when: false
 
-- name: Collect xp2p client endpoints
-  ansible.builtin.raw: xp2p client list
-  register: xp2p_client_endpoints
-  changed_when: false
-  no_log: true
-
 - name: Collect xp2p client redirects
   ansible.builtin.raw: xp2p client redirect list
   register: xp2p_client_redirects_state
@@ -48,6 +42,5 @@
     that:
       - xp2p_client_service_status.stdout is search('(?i)(running|active|enabled)')
       - xp2p_client_network.outbound_tag in xp2p_client_state.stdout or xp2p_client_network.endpoint_name in xp2p_client_state.stdout
-      - xp2p_client_network.endpoint_name in xp2p_client_endpoints.stdout or xp2p_client_network.outbound_tag in xp2p_client_endpoints.stdout
       - xp2p_client_expected_redirects | map(attribute='cidr') | select('in', xp2p_client_redirects_state.stdout) | list | length == xp2p_client_expected_redirects | length
     fail_msg: "XP2P client healthcheck failed on {{ inventory_hostname }}."

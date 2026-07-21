@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from ansible.errors import AnsibleFilterError
@@ -213,14 +214,66 @@ def xp2p_client_endpoint_tags(intents: Any, state: str = "present") -> list[str]
     return sorted(set(tags))
 
 
+def xp2p_client_endpoint_records(current_endpoint_output: Any) -> list[dict[str, Any]]:
+    """Parse xp2p client list output into endpoint records."""
+    current_text = str(current_endpoint_output or "")
+    records: list[dict[str, Any]] = []
+
+    for raw_record in re.findall(r"\{[^{}]*\}", current_text):
+        record = {}
+        for key, quoted_value, bare_value in re.findall(
+            r'([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|([^,\s}]+))',
+            raw_record,
+        ):
+            record[key] = quoted_value or bare_value
+        tag = record.get("tag")
+        if tag:
+            records.append(
+                {
+                    "tag": tag,
+                    "host": record.get("hostname") or record.get("host") or record.get("address"),
+                    "port": record.get("port"),
+                    "user": record.get("user"),
+                    "server_name": record.get("server_name"),
+                }
+            )
+
+    parsed_tags = {record["tag"] for record in records}
+    for line in current_text.splitlines():
+        columns = line.split()
+        if len(columns) < 2:
+            continue
+        tag_index = next((index for index, column in enumerate(columns) if column.startswith("proxy-")), None)
+        if tag_index is None:
+            continue
+        tag = columns[tag_index]
+        if tag in parsed_tags:
+            continue
+        user = None
+        if tag_index == 1 and len(columns) >= 5:
+            user = columns[4]
+        elif tag_index + 1 < len(columns):
+            user = columns[tag_index + 1]
+        records.append(
+            {
+                "tag": tag,
+                "host": columns[0] if tag_index != 0 else None,
+                "port": columns[3] if tag_index == 1 and len(columns) >= 4 else None,
+                "user": user,
+            }
+        )
+
+    return records
+
+
 def xp2p_client_endpoint_apply_plan(intents: Any, current_endpoint_output: Any) -> dict[str, Any]:
     """Plan scoped xp2p client endpoint mutations from desired intents and list output."""
     if intents is None:
         intents = []
     if not isinstance(intents, list):
         raise AnsibleFilterError("xp2p endpoint intents must be a list")
-    current_text = str(current_endpoint_output or "")
-    current_lines = current_text.splitlines()
+    current_records = xp2p_client_endpoint_records(current_endpoint_output)
+    current_tags = {str(record.get("tag")) for record in current_records if record.get("tag")}
     plan: dict[str, Any] = {
         "absent": [],
         "missing": [],
@@ -240,13 +293,15 @@ def xp2p_client_endpoint_apply_plan(intents: Any, current_endpoint_output: Any) 
         if state not in ("present", "absent"):
             raise AnsibleFilterError(f"unsupported xp2p endpoint state for {source} {tag}: {state}")
 
-        tag_present = tag in current_text
+        tag_present = tag in current_tags
         if state == "absent":
             if tag_present:
                 plan["absent"].append(intent)
             continue
 
-        identity_present = any(tag in line and user in line for line in current_lines)
+        identity_present = any(
+            record.get("tag") == tag and str(record.get("user") or "") == user for record in current_records
+        )
         if identity_present:
             continue
         if tag_present:

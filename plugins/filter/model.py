@@ -11,6 +11,7 @@ from ansible_collections.ansible_common.core.plugins.module_utils.xp2p_model imp
     architecture_xp2p_view,
     xp2p_client_endpoint_apply_plan,
     xp2p_client_endpoint_intents,
+    xp2p_client_endpoint_records,
     xp2p_client_endpoint_tags,
 )
 
@@ -450,6 +451,7 @@ class FilterModule(object):
             "architecture_xp2p_view": architecture_xp2p_view,
             "xp2p_client_endpoint_apply_plan": xp2p_client_endpoint_apply_plan,
             "xp2p_client_endpoint_intents": xp2p_client_endpoint_intents,
+            "xp2p_client_endpoint_records": xp2p_client_endpoint_records,
             "xp2p_client_endpoint_tags": xp2p_client_endpoint_tags,
             "architecture_extension": architecture_extension,
         }

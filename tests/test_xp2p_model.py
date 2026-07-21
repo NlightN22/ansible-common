@@ -25,6 +25,19 @@ def server_redirects_by_cidr(view):
     return {redirect["cidr"]: redirect for redirect in view["managed_server_redirects"]}
 
 
+def simulated_endpoint_apply_commands(module, intents, current_output):
+    plan = module.xp2p_client_endpoint_apply_plan(intents, current_output)
+    if plan["implicit_replacements"]:
+        return [f"assert replace=true for {item}" for item in plan["implicit_replacements"]]
+    commands = []
+    commands.extend([f"xp2p client remove {item['tag']} --quiet" for item in plan["absent"]])
+    commands.extend([f"xp2p client install {item['tag']}" for item in plan["missing"]])
+    for item in plan["replacements"]:
+        commands.append(f"xp2p client remove {item['tag']} --quiet")
+        commands.append(f"xp2p client install {item['tag']}")
+    return commands
+
+
 class XP2PModelTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_module()
@@ -196,6 +209,53 @@ class XP2PModelTests(unittest.TestCase):
         self.assertEqual(plan["absent"], [])
         self.assertEqual(plan["replacements"], [])
         self.assertEqual(plan["implicit_replacements"], [])
+
+    def test_client_endpoint_records_parse_table_and_rendered_config_outputs(self) -> None:
+        table_output = "\n".join(
+            [
+                "dcpkt2.ddns.net     proxy-dcpkt2-ddns-net     109.71.242.190   443   AB-Zavodskaya  false           dcpkt2.ddns.net",
+                "in1.komponent-m.ru  proxy-in1-komponent-m-ru  185.177.216.114  443   AB-Zavodskaya  false           in1.komponent-m.ru",
+            ]
+        )
+        rendered_config_output = (
+            'endpoints = [{ address = "109.71.242.190", hostname = "dcpkt2.ddns.net", '
+            'port = 443, server_name = "dcpkt2.ddns.net", tag = "proxy-dcpkt2-ddns-net", '
+            'user = "AB-Zavodskaya" }]'
+        )
+
+        table_records = self.module.xp2p_client_endpoint_records(table_output)
+        rendered_records = self.module.xp2p_client_endpoint_records(rendered_config_output)
+
+        self.assertEqual(
+            {(record["tag"], record["user"]) for record in table_records},
+            {
+                ("proxy-dcpkt2-ddns-net", "AB-Zavodskaya"),
+                ("proxy-in1-komponent-m-ru", "AB-Zavodskaya"),
+            },
+        )
+        self.assertEqual(rendered_records[0]["tag"], "proxy-dcpkt2-ddns-net")
+        self.assertEqual(rendered_records[0]["port"], "443")
+        self.assertEqual(rendered_records[0]["user"], "AB-Zavodskaya")
+
+    def test_single_source_apply_command_simulation_preserves_live_siblings(self) -> None:
+        intent = {
+            "tag": "proxy-dcpkt2-ddns-net",
+            "source": "three_x_ui:dcpkt2-openwrt",
+            "state": "present",
+            "user": "AB-Zavodskaya",
+        }
+        current = "\n".join(
+            [
+                "in1.komponent-m.ru  proxy-in1-komponent-m-ru  185.177.216.114  443  AB-Zavodskaya  false  in1.komponent-m.ru",
+                "ex4.komponent-m.ru  proxy-ex4-komponent-m-ru  141.105.64.152   443  AB-Zavodskaya  false  ex4.komponent-m.ru",
+            ]
+        )
+
+        commands = simulated_endpoint_apply_commands(self.module, [intent], current)
+
+        self.assertEqual(commands, ["xp2p client install proxy-dcpkt2-ddns-net"])
+        self.assertFalse(any("proxy-in1-komponent-m-ru" in command for command in commands))
+        self.assertFalse(any("proxy-ex4-komponent-m-ru" in command for command in commands))
 
     def test_endpoint_apply_plan_requires_explicit_replacement(self) -> None:
         intent = {

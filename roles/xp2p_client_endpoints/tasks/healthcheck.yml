@@ -9,12 +9,23 @@
   changed_when: false
   no_log: true
 
+- name: Parse current XP2P client endpoints
+  ansible.builtin.set_fact:
+    xp2p_client_endpoint_current_tags: >-
+      {{
+        xp2p_client_endpoint_list.stdout
+        | ansible_common.core.xp2p_client_endpoint_records
+        | map(attribute='tag')
+        | list
+      }}
+  no_log: true
+
 - name: Build missing XP2P client endpoint tags
   ansible.builtin.set_fact:
     xp2p_client_endpoint_missing_tags: >-
       {{
         xp2p_client_endpoint_expected_tags
-        | reject('in', xp2p_client_endpoint_list.stdout)
+        | reject('in', xp2p_client_endpoint_current_tags)
         | list
       }}
 
