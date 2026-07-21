@@ -41,6 +41,9 @@
       - >-
         '"full:' ~ item.fqdn ~ '"'
         in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
+      - >-
+        '"' ~ item.expected_ipv4 ~ '/32"'
+        in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
     fail_msg: "Mandatory proxy route {{ item.fqdn }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
   loop: "{{ openwrt_xp2p_three_x_ui_mandatory_proxy_routes }}"
   loop_control:
