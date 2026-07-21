@@ -1,0 +1,6 @@
+---
+xp2p_client_endpoint_intent_model_files: []
+xp2p_client_endpoint_intent_model_fragments: []
+xp2p_client_endpoint_intent_model_version: 1
+xp2p_client_endpoint_intent_node_id: "{{ inventory_hostname }}"
+xp2p_client_endpoint_intent_normalized_model_var: xp2p_client_endpoint_intent_normalized_model

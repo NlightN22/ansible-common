@@ -1,0 +1,49 @@
+---
+- name: Validate XP2P client endpoint intent input
+  ansible.builtin.assert:
+    that:
+      - xp2p_client_endpoint_intent_model_files is sequence
+      - xp2p_client_endpoint_intent_model_files is not string
+      - xp2p_client_endpoint_intent_model_fragments is sequence
+      - xp2p_client_endpoint_intent_model_fragments is not string
+      - xp2p_client_endpoint_intent_node_id | length > 0
+    fail_msg: "XP2P client endpoint intent aggregation requires model files or fragments and a node id."
+
+- name: Materialize XP2P client endpoint intent inputs
+  ansible.builtin.set_fact:
+    xp2p_client_endpoint_intent_effective_model_files: "{{ xp2p_client_endpoint_intent_model_files | list }}"
+    xp2p_client_endpoint_intent_effective_model_fragments: "{{ xp2p_client_endpoint_intent_model_fragments | list }}"
+
+- name: Load XP2P client endpoint intent model files
+  ansible.builtin.include_role:
+    name: ansible_common.core.model_load
+  vars:
+    architecture_model_files: "{{ xp2p_client_endpoint_intent_effective_model_files }}"
+    architecture_model_version: "{{ xp2p_client_endpoint_intent_model_version }}"
+    architecture_model_load_required: false
+  when: xp2p_client_endpoint_intent_effective_model_files | length > 0
+
+- name: Build XP2P client endpoint intent model from fragments
+  ansible.builtin.set_fact:
+    architecture_model: >-
+      {{
+        xp2p_client_endpoint_intent_effective_model_fragments
+        | ansible_common.core.architecture_model_from_fragments(xp2p_client_endpoint_intent_model_version)
+      }}
+  when: xp2p_client_endpoint_intent_effective_model_files | length == 0
+
+- name: Normalize XP2P client endpoint intent model
+  ansible.builtin.set_fact:
+    "{{ xp2p_client_endpoint_intent_normalized_model_var }}": >-
+      {{
+        architecture_model
+        | ansible_common.core.architecture_normalize
+      }}
+
+- name: Publish resolved XP2P client endpoint intents
+  ansible.builtin.set_fact:
+    resolved_xp2p_client_endpoints: >-
+      {{
+        lookup('ansible.builtin.vars', xp2p_client_endpoint_intent_normalized_model_var)
+        | ansible_common.core.xp2p_client_endpoint_intents(xp2p_client_endpoint_intent_node_id)
+      }}

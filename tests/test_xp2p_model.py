@@ -160,7 +160,73 @@ class XP2PModelTests(unittest.TestCase):
         self.assertNotIn("xp2p client remove --all", apply_tasks)
         self.assertNotIn("--force", apply_tasks)
         self.assertNotIn("--all", apply_tasks)
-        self.assertIn("xp2p client remove '{{ item.item.tag }}' --quiet", apply_tasks)
+        self.assertIn("xp2p client remove '{{ item.tag }}' --quiet", apply_tasks)
+
+    def test_endpoint_apply_plan_preserves_sibling_endpoint_tags(self) -> None:
+        intents = [
+            {
+                "tag": "proxy-dcpkt2-ddns-net",
+                "source": "three_x_ui:dcpkt2-openwrt",
+                "state": "present",
+                "user": "AB-Zavodskaya",
+            },
+            {
+                "tag": "proxy-ex4-komponent-m-ru",
+                "source": "three_x_ui:ex4-openwrt",
+                "state": "present",
+                "user": "AB-Zavodskaya",
+            },
+            {
+                "tag": "proxy-in1-komponent-m-ru",
+                "source": "xp2p:in1",
+                "state": "present",
+                "user": "AB-Zavodskaya",
+            },
+        ]
+        current = "\n".join(
+            [
+                "proxy-ex4-komponent-m-ru AB-Zavodskaya",
+                "proxy-in1-komponent-m-ru AB-Zavodskaya",
+            ]
+        )
+
+        plan = self.module.xp2p_client_endpoint_apply_plan([intents[0]], current)
+
+        self.assertEqual([item["tag"] for item in plan["missing"]], ["proxy-dcpkt2-ddns-net"])
+        self.assertEqual(plan["absent"], [])
+        self.assertEqual(plan["replacements"], [])
+        self.assertEqual(plan["implicit_replacements"], [])
+
+    def test_endpoint_apply_plan_requires_explicit_replacement(self) -> None:
+        intent = {
+            "tag": "proxy-dcpkt2-ddns-net",
+            "source": "three_x_ui:dcpkt2-openwrt",
+            "state": "present",
+            "user": "AB-Zavodskaya",
+        }
+        current = "proxy-dcpkt2-ddns-net OLD-CLIENT"
+
+        plan = self.module.xp2p_client_endpoint_apply_plan([intent], current)
+
+        self.assertEqual(plan["missing"], [])
+        self.assertEqual(plan["replacements"], [])
+        self.assertEqual(plan["implicit_replacements"], ["three_x_ui:dcpkt2-openwrt proxy-dcpkt2-ddns-net"])
+
+    def test_endpoint_apply_plan_allows_explicit_replacement(self) -> None:
+        intent = {
+            "tag": "proxy-dcpkt2-ddns-net",
+            "source": "three_x_ui:dcpkt2-openwrt",
+            "state": "present",
+            "user": "AB-Zavodskaya",
+            "replace": True,
+        }
+        current = "proxy-dcpkt2-ddns-net OLD-CLIENT"
+
+        plan = self.module.xp2p_client_endpoint_apply_plan([intent], current)
+
+        self.assertEqual([item["tag"] for item in plan["replacements"]], ["proxy-dcpkt2-ddns-net"])
+        self.assertEqual(plan["missing"], [])
+        self.assertEqual(plan["implicit_replacements"], [])
 
 
 if __name__ == "__main__":

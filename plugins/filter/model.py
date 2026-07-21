@@ -9,6 +9,7 @@ from typing import Any
 from ansible.errors import AnsibleFilterError
 from ansible_collections.ansible_common.core.plugins.module_utils.xp2p_model import (
     architecture_xp2p_view,
+    xp2p_client_endpoint_apply_plan,
     xp2p_client_endpoint_intents,
     xp2p_client_endpoint_tags,
 )
@@ -447,6 +448,7 @@ class FilterModule(object):
             "architecture_network_member": architecture_network_member,
             "architecture_wireguard_view": architecture_wireguard_view,
             "architecture_xp2p_view": architecture_xp2p_view,
+            "xp2p_client_endpoint_apply_plan": xp2p_client_endpoint_apply_plan,
             "xp2p_client_endpoint_intents": xp2p_client_endpoint_intents,
             "xp2p_client_endpoint_tags": xp2p_client_endpoint_tags,
             "architecture_extension": architecture_extension,

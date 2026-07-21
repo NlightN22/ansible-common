@@ -213,6 +213,53 @@ def xp2p_client_endpoint_tags(intents: Any, state: str = "present") -> list[str]
     return sorted(set(tags))
 
 
+def xp2p_client_endpoint_apply_plan(intents: Any, current_endpoint_output: Any) -> dict[str, Any]:
+    """Plan scoped xp2p client endpoint mutations from desired intents and list output."""
+    if intents is None:
+        intents = []
+    if not isinstance(intents, list):
+        raise AnsibleFilterError("xp2p endpoint intents must be a list")
+    current_text = str(current_endpoint_output or "")
+    current_lines = current_text.splitlines()
+    plan: dict[str, Any] = {
+        "absent": [],
+        "missing": [],
+        "replacements": [],
+        "implicit_replacements": [],
+    }
+
+    for intent in intents:
+        if not isinstance(intent, dict):
+            raise AnsibleFilterError("each xp2p endpoint intent must be a mapping")
+        tag = str(intent.get("tag") or "")
+        source = str(intent.get("source") or "")
+        state = str(intent.get("state") or "present")
+        user = str(intent.get("user") or "")
+        if not tag:
+            raise AnsibleFilterError("each xp2p endpoint intent must include tag")
+        if state not in ("present", "absent"):
+            raise AnsibleFilterError(f"unsupported xp2p endpoint state for {source} {tag}: {state}")
+
+        tag_present = tag in current_text
+        if state == "absent":
+            if tag_present:
+                plan["absent"].append(intent)
+            continue
+
+        identity_present = any(tag in line and user in line for line in current_lines)
+        if identity_present:
+            continue
+        if tag_present:
+            if bool(intent.get("replace", False)):
+                plan["replacements"].append(intent)
+            else:
+                plan["implicit_replacements"].append(f"{source} {tag}".strip())
+        else:
+            plan["missing"].append(intent)
+
+    return plan
+
+
 def _host_id(value: Any) -> str | None:
     if isinstance(value, str) and value:
         return value
