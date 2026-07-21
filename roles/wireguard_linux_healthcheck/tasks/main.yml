@@ -18,24 +18,49 @@
         resolved_wireguard_network.current_member.address
         | regex_replace('/.*$', '')
       }}
+    wireguard_linux_endpoint_expected_interface: "{{ resolved_wireguard_network.effective_transport.interface | default('') }}"
 
 - name: Check Linux WireGuard runtime
   ansible.builtin.shell: |
     set -eu
     interface='{{ resolved_wireguard_network.interface_name }}'
+    endpoint_host='{{ resolved_wireguard_network.endpoint.host | default("") }}'
     ping_with_source() {
       target="$1"
       source="$2"
       ping -I "$source" -c {{ wireguard_linux_healthcheck_ping_count | int }} "$target"
+    }
+    route_via_interface() {
+      target="$1"
+      expected_interface="$2"
+      route_get="$(ip route get "$target")"
+      printf '%s\n' "$route_get"
+      printf '%s\n' "$route_get" | grep -q "dev ${expected_interface}\\b"
     }
     echo "### now $(date +%s)"
     echo '### interface'
     ip link show dev "$interface"
     echo '### dump'
     wg show "$interface" dump
+    {% if not (resolved_wireguard_network.is_hub | bool) and resolved_wireguard_network.endpoint.host is defined %}
+    echo '### endpoint route'
+    endpoint_route_get="$(ip route get "$endpoint_host")"
+    printf '%s\n' "$endpoint_route_get"
+    if printf '%s\n' "$endpoint_route_get" | grep -q "dev ${interface}\\b"; then
+      echo "ENDPOINT_ROUTE_LOOP target=${endpoint_host} interface=${interface}"
+      exit 1
+    fi
+    {% if wireguard_linux_endpoint_expected_interface | length > 0 %}
+    if ! printf '%s\n' "$endpoint_route_get" | grep -q "dev {{ wireguard_linux_endpoint_expected_interface | regex_escape }}\\b"; then
+      echo "ENDPOINT_ROUTE_TRANSPORT_MISMATCH target=${endpoint_host} expected_interface={{ wireguard_linux_endpoint_expected_interface }}"
+      exit 1
+    fi
+    {% endif %}
+    {% endif %}
     echo '### routes'
     {% for route_target in wireguard_linux_expected_route_targets %}
-    ip route get {{ route_target | regex_replace('/.*$', '') }}
+    echo '### route {{ route_target }}'
+    route_via_interface {{ route_target | regex_replace('/.*$', '') }} "$interface"
     {% endfor %}
     {% if wireguard_linux_healthcheck_reachability_enabled | bool %}
     echo '### reachability'

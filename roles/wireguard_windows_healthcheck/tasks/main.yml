@@ -16,7 +16,14 @@
   ansible.builtin.set_fact:
     wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}"
     wireguard_windows_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+    wireguard_windows_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
     wireguard_windows_health_ping_addresses: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}"
+    wireguard_windows_healthcheck_ping_source_address: >-
+      {{
+        resolved_wireguard_network.current_member.address
+        | regex_replace('/.*$', '')
+      }}
+    wireguard_windows_endpoint_expected_interface: "{{ resolved_wireguard_network.effective_transport.interface | default('') }}"
 
 - name: Check Windows WireGuard tunnel service and runtime
   ansible.windows.win_shell: |
@@ -24,16 +31,63 @@
     $tunnelName = '{{ wireguard_windows_tunnel_name }}'
     $serviceName = 'WireGuardTunnel${{ wireguard_windows_tunnel_name }}'
     $expectedPeers = '{{ wireguard_windows_expected_peers | to_json }}' | ConvertFrom-Json
+    $routeTargets = '{{ wireguard_windows_expected_route_targets | to_json }}' | ConvertFrom-Json
     $pingTargets = '{{ wireguard_windows_health_ping_addresses | to_json }}' | ConvertFrom-Json
+    $pingSourceAddress = '{{ wireguard_windows_healthcheck_ping_source_address }}'
+    $endpointHost = '{{ resolved_wireguard_network.endpoint.host | default("") }}'
+    $endpointExpectedInterface = '{{ wireguard_windows_endpoint_expected_interface }}'
+    $isHub = {{ (resolved_wireguard_network.is_hub | bool) | ternary('$true', '$false') }}
     if ($expectedPeers -isnot [array]) {
       $expectedPeers = @($expectedPeers)
+    }
+    if ($routeTargets -isnot [array]) {
+      $routeTargets = @($routeTargets)
     }
     if ($pingTargets -isnot [array]) {
       $pingTargets = @($pingTargets)
     }
+    function Get-RouteAddress {
+      param([string]$Target)
+      if ($Target.Contains('/')) {
+        return $Target.Split('/')[0]
+      }
+      return $Target
+    }
+    function Resolve-IPv4Address {
+      param([string]$Target)
+      $parsedAddress = $null
+      if ([System.Net.IPAddress]::TryParse($Target, [ref]$parsedAddress)) {
+        if ($parsedAddress.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+          return $parsedAddress.IPAddressToString
+        }
+      }
+      $resolved = [System.Net.Dns]::GetHostAddresses($Target) |
+        Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork } |
+        Select-Object -First 1
+      if (-not $resolved) {
+        throw "Unable to resolve IPv4 address for $Target."
+      }
+      return $resolved.IPAddressToString
+    }
+    function Find-BestRoute {
+      param([string]$Target)
+      $address = Resolve-IPv4Address -Target (Get-RouteAddress -Target $Target)
+      $route = Find-NetRoute -RemoteIPAddress $address -ErrorAction Stop |
+        Sort-Object -Property RouteMetric, InterfaceMetric |
+        Select-Object -First 1
+      if (-not $route) {
+        throw "No route found for $Target."
+      }
+      return $route
+    }
     $wg = Get-Command wg.exe -ErrorAction SilentlyContinue
     if (-not $wg) {
       throw 'wg.exe is not available in PATH.'
+    }
+    $tunnelInterface = Get-NetIPInterface -InterfaceAlias $tunnelName -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+      Select-Object -First 1
+    if (-not $tunnelInterface) {
+      throw "WireGuard interface $tunnelName is missing from Windows routing table."
     }
     $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if (-not $service) {
@@ -66,11 +120,27 @@
       }
       {% endif %}
     }
+    foreach ($target in $routeTargets) {
+      $route = Find-BestRoute -Target ([string]$target)
+      if ($route.InterfaceAlias -ne $tunnelName) {
+        throw "WireGuard route to $target uses $($route.InterfaceAlias), expected $tunnelName."
+      }
+    }
+    if (-not $isHub -and $endpointHost) {
+      $endpointRoute = Find-BestRoute -Target $endpointHost
+      if ($endpointRoute.InterfaceAlias -eq $tunnelName) {
+        throw "WireGuard endpoint route to $endpointHost loops through $tunnelName."
+      }
+      if ($endpointExpectedInterface -and $endpointRoute.InterfaceAlias -ne $endpointExpectedInterface) {
+        throw "WireGuard endpoint route to $endpointHost uses $($endpointRoute.InterfaceAlias), expected $endpointExpectedInterface."
+      }
+    }
     {% if wireguard_windows_healthcheck_reachability_enabled | bool %}
     foreach ($target in $pingTargets) {
-      $reachable = Test-Connection -ComputerName ([string]$target) -Count {{ wireguard_windows_healthcheck_ping_count | int }} -Quiet
-      if (-not $reachable) {
-        throw "WireGuard ping to $target failed."
+      $pingOutput = & ping.exe -S $pingSourceAddress -n {{ wireguard_windows_healthcheck_ping_count | int }} ([string]$target)
+      $replyCount = @($pingOutput | Where-Object { $_ -match '\bTTL=' }).Count
+      if ($LASTEXITCODE -ne 0 -or $replyCount -ne {{ wireguard_windows_healthcheck_ping_count | int }}) {
+        throw "WireGuard ping from $pingSourceAddress to $target failed. Replies: $replyCount."
       }
     }
     {% endif %}
@@ -79,6 +149,7 @@
       ServiceName = $serviceName
       ServiceStatus = [string]$service.Status
       ExpectedPeerCount = $expectedPeers.Count
+      RouteTargetCount = $routeTargets.Count
       PingTargetCount = $pingTargets.Count
     } | ConvertTo-Json -Compress
   register: windows_wireguard_health
