@@ -27,16 +27,16 @@
   vars:
     three_x_ui_openwrt_routing_proxy_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}"
     three_x_ui_openwrt_routing_final_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default('direct') }}"
-    three_x_ui_openwrt_routing_mandatory_proxy_routes: "{{ openwrt_xp2p_three_x_ui_mandatory_proxy_routes }}"
-    three_x_ui_openwrt_routing_mandatory_proxy_outbound_tag: "{{ openwrt_xp2p_three_x_ui_mandatory_proxy_outbound_tag }}"
+    three_x_ui_openwrt_routing_proxy_routes: "{{ openwrt_xp2p_three_x_ui_proxy_routes }}"
+    three_x_ui_openwrt_routing_proxy_route_outbound_tag: "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
   delegate_to: localhost
   run_once: true
 
-- name: Validate rendered 3x-ui OpenWrt mandatory proxy routing on control host
+- name: Validate rendered 3x-ui OpenWrt proxy routing on control host
   ansible.builtin.assert:
     that:
       - >-
-        '"outboundTag": "' ~ openwrt_xp2p_three_x_ui_mandatory_proxy_outbound_tag ~ '"'
+        '"outboundTag": "' ~ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag ~ '"'
         in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
       - >-
         '"full:' ~ item.fqdn ~ '"'
@@ -44,8 +44,8 @@
       - >-
         '"' ~ item.expected_ipv4 ~ '/32"'
         in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
-    fail_msg: "Mandatory proxy route {{ item.fqdn }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
-  loop: "{{ openwrt_xp2p_three_x_ui_mandatory_proxy_routes }}"
+    fail_msg: "Proxy route {{ item.fqdn }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
+  loop: "{{ openwrt_xp2p_three_x_ui_proxy_routes }}"
   loop_control:
     label: "{{ item.fqdn }}"
   delegate_to: localhost
