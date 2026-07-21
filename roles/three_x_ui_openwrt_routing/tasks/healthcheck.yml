@@ -32,6 +32,10 @@
     done
     test -s '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
     grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' >/dev/null
+    {% for route in openwrt_xp2p_three_x_ui_mandatory_proxy_routes %}
+    grep -A{{ openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length + 2 }} -F -- '"full:{{ route.fqdn }}"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
+      grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_mandatory_proxy_outbound_tag }}"' >/dev/null
+    {% endfor %}
     grep -A3 -F '"network": "tcp,udp"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
       grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' >/dev/null
   register: openwrt_xp2p_three_x_ui_routing_state_healthcheck

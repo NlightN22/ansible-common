@@ -25,6 +25,39 @@
         | combine(openwrt_xp2p_three_x_ui_routing_client_settings, recursive=True)
       }}
 
+- name: Build 3x-ui OpenWrt mandatory routing safety context
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_mandatory_proxy_routes: "{{ openwrt_xp2p_three_x_ui_routing.mandatory_proxy_routes | default([]) }}"
+    openwrt_xp2p_three_x_ui_mandatory_proxy_outbound_tag: >-
+      {{
+        openwrt_xp2p_three_x_ui_routing.mandatory_proxy_outbound_tag
+        | default(openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag | default(''))
+      }}
+    openwrt_xp2p_three_x_ui_endpoint_hostnames: >-
+      {{
+        (
+          [
+            openwrt_xp2p_three_x_ui_routing_star.hub_host | default(''),
+            openwrt_xp2p_three_x_ui_routing_star.endpoint.host | default(''),
+            openwrt_xp2p_three_x_ui_routing_star.endpoint.sni | default('')
+          ]
+          + (openwrt_xp2p_three_x_ui_routing.tunnel_endpoint_hostnames | default([]))
+        )
+        | map('lower')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+    openwrt_xp2p_three_x_ui_endpoint_public_ips: >-
+      {{
+        openwrt_xp2p_three_x_ui_routing.tunnel_endpoint_public_ips
+        | default([])
+        | map('string')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+
 - name: Validate 3x-ui OpenWrt routing model
   ansible.builtin.assert:
     that:
@@ -37,6 +70,61 @@
       - openwrt_xp2p_three_x_ui_routing.dat_files | default([]) | length > 0
       - openwrt_xp2p_three_x_ui_routing.socks_port | default(0) | int > 0
       - openwrt_xp2p_three_x_ui_routing.socks_egress_checks | default([]) | length > 0
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length == 0
+        or openwrt_xp2p_three_x_ui_mandatory_proxy_outbound_tag | length > 0
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('service', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('fqdn', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('expected_ipv4', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('observed_ttl', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('observed_source', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('outbound_tag', 'defined')
+        | list
+        | length == openwrt_xp2p_three_x_ui_mandatory_proxy_routes | length
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | selectattr('outbound_tag', 'defined')
+        | map(attribute='outbound_tag')
+        | unique
+        | list
+        | difference([openwrt_xp2p_three_x_ui_mandatory_proxy_outbound_tag])
+        | length == 0
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | map(attribute='fqdn')
+        | map('lower')
+        | list
+        | intersect(openwrt_xp2p_three_x_ui_endpoint_hostnames)
+        | length == 0
+      - >-
+        openwrt_xp2p_three_x_ui_mandatory_proxy_routes
+        | map(attribute='expected_ipv4')
+        | map('string')
+        | list
+        | intersect(openwrt_xp2p_three_x_ui_endpoint_public_ips)
+        | length == 0
       - >-
         openwrt_xp2p_three_x_ui_routing.socks_egress_checks
         | selectattr('url', 'defined')
