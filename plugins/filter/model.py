@@ -293,13 +293,13 @@ def architecture_wireguard_view(
     view["windows_config_dir"] = hub_member.get("windows_config_dir")
     node_data = model.get("nodes", {})
     if isinstance(node_data, dict) and isinstance(view.get("hub"), str) and isinstance(node_data.get(view["hub"]), dict):
-        view["hub_member"] = _deep_merge(view["hub_member"], node_data[view["hub"]])
+        view["hub_member"] = _deep_merge(node_data[view["hub"]], view["hub_member"])
         view["members"][str(view.get("hub"))] = view["hub_member"]
     if isinstance(node_data, dict):
         for peer_id, peer in list(view.get("peers", {}).items()):
             host = peer.get("host", peer_id) if isinstance(peer, dict) else peer_id
             if isinstance(host, str) and isinstance(node_data.get(host), dict):
-                merged_peer = _deep_merge(peer, node_data[host])
+                merged_peer = _deep_merge(node_data[host], peer)
                 view["peers"][peer_id] = merged_peer
                 if peer_id in view.get("active_peers", {}):
                     view["active_peers"][peer_id] = merged_peer
@@ -308,7 +308,7 @@ def architecture_wireguard_view(
     if node_id:
         member = architecture_network_member(view, node_id)
         if isinstance(member, dict) and isinstance(node_data, dict) and isinstance(node_data.get(node_id), dict):
-            member = _deep_merge(member, node_data[node_id])
+            member = _deep_merge(node_data[node_id], member)
         view["current_member"] = member
         view["is_hub"] = architecture_is_hub(view, node_id)
         if member is not None:

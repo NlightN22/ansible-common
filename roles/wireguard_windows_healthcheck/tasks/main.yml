@@ -16,6 +16,7 @@
   ansible.builtin.set_fact:
     wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}"
     wireguard_windows_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+    wireguard_windows_health_ping_addresses: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}"
 
 - name: Check Windows WireGuard tunnel service and runtime
   ansible.windows.win_shell: |
@@ -23,8 +24,12 @@
     $tunnelName = '{{ wireguard_windows_tunnel_name }}'
     $serviceName = 'WireGuardTunnel${{ wireguard_windows_tunnel_name }}'
     $expectedPeers = '{{ wireguard_windows_expected_peers | to_json }}' | ConvertFrom-Json
+    $pingTargets = '{{ wireguard_windows_health_ping_addresses | to_json }}' | ConvertFrom-Json
     if ($expectedPeers -isnot [array]) {
       $expectedPeers = @($expectedPeers)
+    }
+    if ($pingTargets -isnot [array]) {
+      $pingTargets = @($pingTargets)
     }
     $wg = Get-Command wg.exe -ErrorAction SilentlyContinue
     if (-not $wg) {
@@ -61,11 +66,20 @@
       }
       {% endif %}
     }
+    {% if wireguard_windows_healthcheck_reachability_enabled | bool %}
+    foreach ($target in $pingTargets) {
+      $reachable = Test-Connection -ComputerName ([string]$target) -Count {{ wireguard_windows_healthcheck_ping_count | int }} -Quiet
+      if (-not $reachable) {
+        throw "WireGuard ping to $target failed."
+      }
+    }
+    {% endif %}
     [PSCustomObject]@{
       TunnelName = $tunnelName
       ServiceName = $serviceName
       ServiceStatus = [string]$service.Status
       ExpectedPeerCount = $expectedPeers.Count
+      PingTargetCount = $pingTargets.Count
     } | ConvertTo-Json -Compress
   register: windows_wireguard_health
   changed_when: false

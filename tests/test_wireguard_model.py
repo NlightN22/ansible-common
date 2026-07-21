@@ -73,6 +73,35 @@ class WireGuardModelTests(unittest.TestCase):
 
         self.assertEqual(peers[0]["allowed_ips"], ["198.51.100.1/32"])
 
+    def test_wireguard_ping_targets_use_only_selected_network_for_multi_member_host(self) -> None:
+        first_fragment = yaml.safe_load(FIXTURE_PATH.read_text())
+        first_fragment["wireguard_site"]["id"] = "first_wg"
+        first_fragment["wireguard_site"]["network_cidr"] = "198.51.100.0/24"
+        first_fragment["wireguard_site"]["hub"]["host"] = "first-hub"
+        first_fragment["wireguard_site"]["hub"]["address"] = "198.51.100.1/32"
+        first_fragment["wireguard_site"]["hub"]["allowed_ips"] = ["198.51.100.1/32"]
+        first_fragment["wireguard_site"]["spokes"][0]["host"] = "multi-member"
+        first_fragment["wireguard_site"]["spokes"][0]["address"] = "198.51.100.16/32"
+
+        second_fragment = yaml.safe_load(FIXTURE_PATH.read_text())
+        second_fragment["wireguard_site"]["id"] = "second_wg"
+        second_fragment["wireguard_site"]["network_cidr"] = "203.0.113.0/24"
+        second_fragment["wireguard_site"]["hub"]["host"] = "second-hub"
+        second_fragment["wireguard_site"]["hub"]["address"] = "203.0.113.1/32"
+        second_fragment["wireguard_site"]["hub"]["allowed_ips"] = ["203.0.113.1/32"]
+        second_fragment["wireguard_site"]["spokes"][0]["host"] = "multi-member"
+        second_fragment["wireguard_site"]["spokes"][0]["address"] = "203.0.113.16/32"
+
+        normalized = self.module.architecture_model_from_fragments([first_fragment, second_fragment])
+        normalized = self.module.architecture_normalize(normalized)
+        first_view = self.module.architecture_wireguard_view(normalized, "first_wg", "multi-member")
+        second_view = self.module.architecture_wireguard_view(normalized, "second_wg", "multi-member")
+
+        self.assertEqual(first_view["current_member"]["address"], "198.51.100.16/32")
+        self.assertEqual(second_view["current_member"]["address"], "203.0.113.16/32")
+        self.assertEqual(self.wireguard_module.wireguard_expected_ping_targets(first_view), ["198.51.100.1"])
+        self.assertEqual(self.wireguard_module.wireguard_expected_ping_targets(second_view), ["203.0.113.1"])
+
     def test_three_x_ui_star_can_use_hub_host_as_generic_hub(self) -> None:
         fragment = {
             "three_x_ui_star": {

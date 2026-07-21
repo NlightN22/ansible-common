@@ -12,11 +12,22 @@
   ansible.builtin.set_fact:
     wireguard_linux_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
     wireguard_linux_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
+    wireguard_linux_health_ping_addresses: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}"
+    wireguard_linux_healthcheck_ping_source_address: >-
+      {{
+        resolved_wireguard_network.current_member.address
+        | regex_replace('/.*$', '')
+      }}
 
 - name: Check Linux WireGuard runtime
   ansible.builtin.shell: |
     set -eu
     interface='{{ resolved_wireguard_network.interface_name }}'
+    ping_with_source() {
+      target="$1"
+      source="$2"
+      ping -I "$source" -c {{ wireguard_linux_healthcheck_ping_count | int }} "$target"
+    }
     echo "### now $(date +%s)"
     echo '### interface'
     ip link show dev "$interface"
@@ -26,6 +37,13 @@
     {% for route_target in wireguard_linux_expected_route_targets %}
     ip route get {{ route_target | regex_replace('/.*$', '') }}
     {% endfor %}
+    {% if wireguard_linux_healthcheck_reachability_enabled | bool %}
+    echo '### reachability'
+    {% for address in wireguard_linux_health_ping_addresses %}
+    echo '### ping {{ address }}'
+    ping_with_source {{ address }} "{{ wireguard_linux_healthcheck_ping_source_address }}"
+    {% endfor %}
+    {% endif %}
   register: wireguard_linux_health
   changed_when: false
   become: "{{ wireguard_linux_healthcheck_become | bool }}"

@@ -1,3 +1,5 @@
 ---
+wireguard_windows_healthcheck_reachability_enabled: true
+wireguard_windows_healthcheck_ping_count: 3
 wireguard_windows_healthcheck_handshake_enabled: false
 wireguard_windows_healthcheck_handshake_max_age_seconds: 300
