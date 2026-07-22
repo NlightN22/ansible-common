@@ -28,6 +28,8 @@
     resource_id='{{ item.resource_id }}'
     layer='{{ item.layer }}'
     port='{{ item.expected_port | default(443) }}'
+    protocol='{{ item.expected_protocol | default("http") }}'
+    check_paths="$(printf '%s\n' {% for path in item.check_paths | default(["router", "lan_probe"]) %}'{{ path }}' {% endfor %} | sed '/^$/d')"
     egress_policy='{{ item.egress_policy | default("proxy") }}'
     socks_port='{{ internet_access_healthcheck_socks_port | int }}'
     domains="$(printf '%s\n' {% for domain in item.domains | default([]) %}'{{ domain }}' {% endfor %} | sed '/^$/d')"
@@ -47,7 +49,16 @@
     check_tcp() {
       host="$1"
       port="$2"
-      if command -v curl >/dev/null 2>&1; then
+      if [ "$protocol" = ssh ]; then
+        if command -v nc >/dev/null 2>&1; then
+          timeout {{ internet_access_healthcheck_max_time | int }} sh -c "nc \"\$1\" \"\$2\" </dev/null" sh "$host" "$port" 2>/dev/null |
+            sed -n '1p' |
+            grep -Eq '^SSH-'
+        else
+          echo "NO_SSH_CHECK_CLIENT"
+          return 1
+        fi
+      elif command -v curl >/dev/null 2>&1; then
         proxy_args=""
         if [ "$egress_policy" = proxy ] && [ "$socks_port" -gt 0 ]; then
           proxy_args="--socks5-hostname 127.0.0.1:${socks_port}"
@@ -61,6 +72,11 @@
         return 1
       fi
     }
+
+    if ! printf '%s\n' "$check_paths" | grep -Fxq router; then
+      echo "ROUTER_SKIPPED layer=$layer resource=$resource_id"
+      exit 0
+    fi
 
     if [ -z "$domains" ] && [ -z "$ipv4_cidrs" ]; then
       echo "RESOURCE_HAS_NO_ROUTABLE_TARGETS layer=$layer resource=$resource_id"
@@ -125,6 +141,8 @@
     resource_id='{{ item.resource_id }}'
     layer='{{ item.layer }}'
     port='{{ item.expected_port | default(443) }}'
+    protocol='{{ item.expected_protocol | default("http") }}'
+    check_paths="$(printf '%s\n' {% for path in item.check_paths | default(["router", "lan_probe"]) %}'{{ path }}' {% endfor %} | sed '/^$/d')"
     domains="$(printf '%s\n' {% for domain in item.domains | default([]) %}'{{ domain }}' {% endfor %} | sed '/^$/d')"
     ipv4_cidrs="$(printf '%s\n' {% for cidr in item.ipv4_cidrs | default([]) %}'{{ cidr }}' {% endfor %} | sed '/^$/d')"
 
@@ -142,7 +160,16 @@
     check_tcp() {
       host="$1"
       port="$2"
-      if command -v curl >/dev/null 2>&1; then
+      if [ "$protocol" = ssh ]; then
+        if command -v nc >/dev/null 2>&1; then
+          timeout {{ internet_access_healthcheck_max_time | int }} sh -c "nc \"\$1\" \"\$2\" </dev/null" sh "$host" "$port" 2>/dev/null |
+            sed -n '1p' |
+            grep -Eq '^SSH-'
+        else
+          echo "LAN_PROBE_NO_SSH_CHECK_CLIENT"
+          return 1
+        fi
+      elif command -v curl >/dev/null 2>&1; then
         curl -k -sS -o /dev/null --connect-timeout {{ internet_access_healthcheck_connect_timeout | int }} --max-time {{ internet_access_healthcheck_max_time | int }} "https://${host}/" 2>/dev/null ||
           curl -sS -o /dev/null --connect-timeout {{ internet_access_healthcheck_connect_timeout | int }} --max-time {{ internet_access_healthcheck_max_time | int }} "http://${host}/" 2>/dev/null
       elif command -v nc >/dev/null 2>&1; then
@@ -152,6 +179,11 @@
         return 1
       fi
     }
+
+    if ! printf '%s\n' "$check_paths" | grep -Fxq lan_probe; then
+      echo "LAN_PROBE_SKIPPED layer=$layer resource=$resource_id"
+      exit 0
+    fi
 
     if [ -z "$domains" ] && [ -z "$ipv4_cidrs" ]; then
       echo "LAN_PROBE_RESOURCE_HAS_NO_ROUTABLE_TARGETS layer=$layer resource=$resource_id"
