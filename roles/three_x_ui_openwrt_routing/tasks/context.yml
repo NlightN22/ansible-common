@@ -25,15 +25,29 @@
         | combine(openwrt_xp2p_three_x_ui_routing_client_settings, recursive=True)
       }}
 
-- name: Build 3x-ui OpenWrt proxy route safety context
+- name: Build 3x-ui OpenWrt required access context
   ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_komponent_proxy_routes: "{{ openwrt_xp2p_three_x_ui_routing.komponent_proxy_routes | default([]) }}"
-    openwrt_xp2p_three_x_ui_zamena_proxy_routes: "{{ openwrt_xp2p_three_x_ui_routing.zamena_proxy_routes | default([]) }}"
     openwrt_xp2p_three_x_ui_proxy_route_outbound_tag: >-
       {{
         openwrt_xp2p_three_x_ui_routing.proxy_route_outbound_tag
         | default(openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag | default(''))
       }}
+    openwrt_xp2p_three_x_ui_required_access_layers: "{{ openwrt_xp2p_three_x_ui_routing.required_access.layers | default([]) }}"
+
+- name: Build 3x-ui OpenWrt required access proxy route list
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_required_access_proxy_routes: >-
+      {{
+        internet_access_policy
+        | default({'layers': []})
+        | ansible_common.core.internet_access_policy_proxy_routes(
+            openwrt_xp2p_three_x_ui_required_access_layers,
+            openwrt_xp2p_three_x_ui_proxy_route_outbound_tag
+          )
+      }}
+
+- name: Build 3x-ui OpenWrt proxy route safety context
+  ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_endpoint_hostnames: >-
       {{
         (
@@ -63,8 +77,8 @@
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_proxy_routes: >-
       {{
-        openwrt_xp2p_three_x_ui_komponent_proxy_routes
-        + openwrt_xp2p_three_x_ui_zamena_proxy_routes
+        openwrt_xp2p_three_x_ui_routing.proxy_routes | default([])
+        + openwrt_xp2p_three_x_ui_required_access_proxy_routes
       }}
 
 - name: Validate 3x-ui OpenWrt routing model
@@ -84,6 +98,13 @@
       - >-
         openwrt_xp2p_three_x_ui_routing.mandatory_proxy_outbound_tag is not defined
       - >-
+        openwrt_xp2p_three_x_ui_routing.komponent_proxy_routes is not defined
+      - >-
+        openwrt_xp2p_three_x_ui_routing.zamena_proxy_routes is not defined
+      - >-
+        openwrt_xp2p_three_x_ui_required_access_layers | length == 0
+        or internet_access_policy is defined
+      - >-
         openwrt_xp2p_three_x_ui_proxy_routes | length == 0
         or openwrt_xp2p_three_x_ui_proxy_route_outbound_tag | length > 0
       - >-
@@ -93,22 +114,8 @@
         | length == openwrt_xp2p_three_x_ui_proxy_routes | length
       - >-
         openwrt_xp2p_three_x_ui_proxy_routes
-        | selectattr('fqdn', 'defined')
-        | list
-        | length == openwrt_xp2p_three_x_ui_proxy_routes | length
-      - >-
-        openwrt_xp2p_three_x_ui_proxy_routes
-        | selectattr('expected_ipv4', 'defined')
-        | list
-        | length == openwrt_xp2p_three_x_ui_proxy_routes | length
-      - >-
-        openwrt_xp2p_three_x_ui_proxy_routes
-        | selectattr('observed_ttl', 'defined')
-        | list
-        | length == openwrt_xp2p_three_x_ui_proxy_routes | length
-      - >-
-        openwrt_xp2p_three_x_ui_proxy_routes
-        | selectattr('observed_source', 'defined')
+        | map('ansible_common.core.internet_access_policy_routing_route_ready')
+        | select('equalto', true)
         | list
         | length == openwrt_xp2p_three_x_ui_proxy_routes | length
       - >-
@@ -126,15 +133,17 @@
         | length == 0
       - >-
         openwrt_xp2p_three_x_ui_proxy_routes
-        | map(attribute='fqdn')
+        | map(attribute='fqdn', default='')
         | map('lower')
+        | reject('equalto', '')
         | list
         | intersect(openwrt_xp2p_three_x_ui_endpoint_hostnames)
         | length == 0
       - >-
         openwrt_xp2p_three_x_ui_proxy_routes
-        | map(attribute='expected_ipv4')
+        | map(attribute='expected_ipv4', default='')
         | map('string')
+        | reject('equalto', '')
         | list
         | intersect(openwrt_xp2p_three_x_ui_endpoint_public_ips)
         | length == 0

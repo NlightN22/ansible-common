@@ -32,10 +32,19 @@
     done
     test -s '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
     grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' >/dev/null
+    {% set routing_ns = namespace(domains=[], ipv4_cidrs=[]) %}
     {% for route in openwrt_xp2p_three_x_ui_proxy_routes %}
-    grep -A{{ openwrt_xp2p_three_x_ui_proxy_routes | length + 2 }} -F -- '"full:{{ route.fqdn }}"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
+    {% set routing_ns.domains = routing_ns.domains + (route.domains | default([route.fqdn] if route.fqdn is defined else [])) %}
+    {% set routing_ns.ipv4_cidrs = routing_ns.ipv4_cidrs + (route.ipv4_cidrs | default([route.expected_ipv4 ~ '/32'] if route.expected_ipv4 is defined else [])) %}
+    {% endfor %}
+    {% set route_domains = routing_ns.domains | reject('equalto', '') | unique | list %}
+    {% set route_ipv4_cidrs = routing_ns.ipv4_cidrs | reject('equalto', '') | unique | list %}
+    {% for domain in route_domains %}
+    grep -A{{ route_domains | length + 2 }} -F -- '"full:{{ domain }}"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
       grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' >/dev/null
-    grep -A{{ openwrt_xp2p_three_x_ui_proxy_routes | length + 2 }} -F -- '"{{ route.expected_ipv4 }}/32"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
+    {% endfor %}
+    {% for cidr in route_ipv4_cidrs %}
+    grep -A{{ route_ipv4_cidrs | length + 2 }} -F -- '"{{ cidr }}"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
       grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' >/dev/null
     {% endfor %}
     grep -A3 -F '"network": "tcp,udp"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |

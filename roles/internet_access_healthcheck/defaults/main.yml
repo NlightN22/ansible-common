@@ -1,0 +1,9 @@
+---
+internet_access_healthcheck_layers:
+  - all
+internet_access_healthcheck_lan_probe_enabled: true
+internet_access_healthcheck_lan_probe: {}
+internet_access_healthcheck_connect_timeout: 8
+internet_access_healthcheck_max_time: 20
+internet_access_healthcheck_socks_port: 0
+internet_access_healthcheck_failures: []

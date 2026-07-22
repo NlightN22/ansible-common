@@ -1,0 +1,200 @@
+---
+- name: Validate internet access healthcheck inputs
+  ansible.builtin.assert:
+    that:
+      - internet_access_policy is mapping
+      - internet_access_healthcheck_layers | length > 0
+    fail_msg: "internet_access_healthcheck requires internet_access_policy and selected layers."
+
+- name: Build required internet access resource list
+  ansible.builtin.set_fact:
+    internet_access_healthcheck_resources: >-
+      {{
+        internet_access_policy
+        | ansible_common.core.internet_access_policy_resources(internet_access_healthcheck_layers)
+      }}
+    internet_access_healthcheck_failures: []
+    internet_access_healthcheck_results: []
+
+- name: Validate required internet access resources
+  ansible.builtin.assert:
+    that:
+      - internet_access_healthcheck_resources | length > 0
+    fail_msg: "No required internet access resources matched selected layers."
+
+- name: Check required access from router path
+  ansible.builtin.raw: |
+    set -eu
+    resource_id='{{ item.resource_id }}'
+    layer='{{ item.layer }}'
+    port='{{ item.expected_port | default(443) }}'
+    egress_policy='{{ item.egress_policy | default("proxy") }}'
+    socks_port='{{ internet_access_healthcheck_socks_port | int }}'
+    domains="$(printf '%s\n' {% for domain in item.domains | default([]) %}'{{ domain }}' {% endfor %} | sed '/^$/d')"
+    ipv4_cidrs="$(printf '%s\n' {% for cidr in item.ipv4_cidrs | default([]) %}'{{ cidr }}' {% endfor %} | sed '/^$/d')"
+
+    resolve_domain() {
+      domain="$1"
+      if command -v getent >/dev/null 2>&1; then
+        getent ahostsv4 "$domain" | awk '{print $1}' | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -1
+      elif command -v nslookup >/dev/null 2>&1; then
+        nslookup "$domain" | awk '/^Address [0-9]*: / {print $3} /^Address: / {print $2}' | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -1
+      else
+        return 1
+      fi
+    }
+
+    check_tcp() {
+      host="$1"
+      port="$2"
+      if command -v curl >/dev/null 2>&1; then
+        proxy_args=""
+        if [ "$egress_policy" = proxy ] && [ "$socks_port" -gt 0 ]; then
+          proxy_args="--socks5-hostname 127.0.0.1:${socks_port}"
+        fi
+        curl -k -sS -o /dev/null --connect-timeout {{ internet_access_healthcheck_connect_timeout | int }} --max-time {{ internet_access_healthcheck_max_time | int }} $proxy_args "https://${host}/" 2>/dev/null ||
+          curl -sS -o /dev/null --connect-timeout {{ internet_access_healthcheck_connect_timeout | int }} --max-time {{ internet_access_healthcheck_max_time | int }} $proxy_args "http://${host}/" 2>/dev/null
+      elif command -v nc >/dev/null 2>&1; then
+        nc -z -w {{ internet_access_healthcheck_connect_timeout | int }} "$host" "$port"
+      else
+        echo "NO_TCP_CHECK_CLIENT"
+        return 1
+      fi
+    }
+
+    if [ -z "$domains" ] && [ -z "$ipv4_cidrs" ]; then
+      echo "RESOURCE_HAS_NO_ROUTABLE_TARGETS layer=$layer resource=$resource_id"
+      exit 1
+    fi
+
+    printf '%s\n' "$domains" | while read -r domain; do
+      [ -n "$domain" ] || continue
+      ip="$(resolve_domain "$domain" || true)"
+      if [ -z "$ip" ]; then
+        echo "DNS_FAILED layer=$layer resource=$resource_id domain=$domain"
+        exit 1
+      fi
+      route="$(ip route get "$ip" 2>&1 || true)"
+      if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
+        echo "ROUTE_DECISION_FAILED layer=$layer resource=$resource_id domain=$domain ip=$ip route=$route"
+        exit 1
+      fi
+      check_tcp "$domain" "$port" >/dev/null || {
+        echo "TCP_ACCESS_FAILED layer=$layer resource=$resource_id domain=$domain port=$port ip=$ip route=$route"
+        exit 1
+      }
+      echo "ROUTER_OK layer=$layer resource=$resource_id domain=$domain ip=$ip route=$(printf '%s' "$route" | tr '\n' ' ')"
+    done
+
+    printf '%s\n' "$ipv4_cidrs" | while read -r cidr; do
+      [ -n "$cidr" ] || continue
+      target="${cidr%%/*}"
+      route="$(ip route get "$target" 2>&1 || true)"
+      if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
+        echo "CIDR_ROUTE_DECISION_FAILED layer=$layer resource=$resource_id cidr=$cidr route=$route"
+        exit 1
+      fi
+      echo "ROUTER_ROUTE_OK layer=$layer resource=$resource_id cidr=$cidr route=$(printf '%s' "$route" | tr '\n' ' ')"
+    done
+  register: internet_access_healthcheck_router_result
+  changed_when: false
+  failed_when: false
+  loop: "{{ internet_access_healthcheck_resources }}"
+  loop_control:
+    label: "{{ item.layer }}:{{ item.resource_id }}"
+
+- name: Record router required access failures
+  ansible.builtin.set_fact:
+    internet_access_healthcheck_failures: >-
+      {{
+        internet_access_healthcheck_failures
+        + [
+          'router path failed on ' ~ inventory_hostname ~
+          ' for ' ~ item.item.layer ~ ':' ~ item.item.resource_id ~
+          ': ' ~ (item.stdout | default(item.stderr | default('')) | trim)
+        ]
+      }}
+  loop: "{{ internet_access_healthcheck_router_result.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.layer }}:{{ item.item.resource_id }}"
+  when: item.rc | default(0) | int != 0
+
+- name: Check required access from LAN probe path
+  ansible.builtin.raw: |
+    set -eu
+    resource_id='{{ item.resource_id }}'
+    layer='{{ item.layer }}'
+    port='{{ item.expected_port | default(443) }}'
+    domains="$(printf '%s\n' {% for domain in item.domains | default([]) %}'{{ domain }}' {% endfor %} | sed '/^$/d')"
+
+    check_tcp() {
+      host="$1"
+      port="$2"
+      if command -v curl >/dev/null 2>&1; then
+        curl -k -sS -o /dev/null --connect-timeout {{ internet_access_healthcheck_connect_timeout | int }} --max-time {{ internet_access_healthcheck_max_time | int }} "https://${host}/" 2>/dev/null ||
+          curl -sS -o /dev/null --connect-timeout {{ internet_access_healthcheck_connect_timeout | int }} --max-time {{ internet_access_healthcheck_max_time | int }} "http://${host}/" 2>/dev/null
+      elif command -v nc >/dev/null 2>&1; then
+        nc -z -w {{ internet_access_healthcheck_connect_timeout | int }} "$host" "$port"
+      else
+        echo "LAN_PROBE_NO_TCP_CHECK_CLIENT"
+        return 1
+      fi
+    }
+
+    if [ -z "$domains" ]; then
+      echo "LAN_PROBE_NO_DOMAIN_TARGET layer=$layer resource=$resource_id"
+      exit 0
+    fi
+    printf '%s\n' "$domains" | while read -r domain; do
+      [ -n "$domain" ] || continue
+      check_tcp "$domain" "$port" >/dev/null || {
+        echo "LAN_PROBE_TCP_ACCESS_FAILED layer=$layer resource=$resource_id domain=$domain port=$port"
+        exit 1
+      }
+      echo "LAN_PROBE_OK layer=$layer resource=$resource_id domain=$domain port=$port"
+    done
+  register: internet_access_healthcheck_lan_probe_result
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ internet_access_healthcheck_lan_probe.host }}"
+  loop: "{{ internet_access_healthcheck_resources }}"
+  loop_control:
+    label: "{{ item.layer }}:{{ item.resource_id }}"
+  when:
+    - internet_access_healthcheck_lan_probe_enabled | bool
+    - internet_access_healthcheck_lan_probe.enabled | default(false) | bool
+    - internet_access_healthcheck_lan_probe.host | default('') | length > 0
+
+- name: Record LAN probe required access failures
+  ansible.builtin.set_fact:
+    internet_access_healthcheck_failures: >-
+      {{
+        internet_access_healthcheck_failures
+        + [
+          'LAN probe failed on ' ~ inventory_hostname ~
+          ' via ' ~ internet_access_healthcheck_lan_probe.host ~
+          ' for ' ~ item.item.layer ~ ':' ~ item.item.resource_id ~
+          ': ' ~ (item.stdout | default(item.stderr | default('')) | trim)
+        ]
+      }}
+  loop: "{{ internet_access_healthcheck_lan_probe_result.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.layer }}:{{ item.item.resource_id }}"
+  when:
+    - internet_access_healthcheck_lan_probe_result is defined
+    - item.rc | default(0) | int != 0
+
+- name: Report missing LAN probe for required access
+  ansible.builtin.debug:
+    msg: "no_lan_probe_configured host={{ inventory_hostname }} checked_path=router_only"
+  when: >-
+    not (internet_access_healthcheck_lan_probe.enabled | default(false) | bool)
+    or internet_access_healthcheck_lan_probe.host | default('') | length == 0
+
+- name: Validate required internet access healthcheck result
+  ansible.builtin.assert:
+    that:
+      - internet_access_healthcheck_failures | length == 0
+    fail_msg: >-
+      Required internet access failures:
+      {{ internet_access_healthcheck_failures | join('; ') }}
