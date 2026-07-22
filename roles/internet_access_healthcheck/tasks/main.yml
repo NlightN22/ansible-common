@@ -126,6 +126,18 @@
     layer='{{ item.layer }}'
     port='{{ item.expected_port | default(443) }}'
     domains="$(printf '%s\n' {% for domain in item.domains | default([]) %}'{{ domain }}' {% endfor %} | sed '/^$/d')"
+    ipv4_cidrs="$(printf '%s\n' {% for cidr in item.ipv4_cidrs | default([]) %}'{{ cidr }}' {% endfor %} | sed '/^$/d')"
+
+    resolve_domain() {
+      domain="$1"
+      if command -v getent >/dev/null 2>&1; then
+        getent ahostsv4 "$domain" | awk '{print $1}' | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -1
+      elif command -v nslookup >/dev/null 2>&1; then
+        nslookup "$domain" | awk '/^Address [0-9]*: / {print $3} /^Address: / {print $2}' | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -1
+      else
+        return 1
+      fi
+    }
 
     check_tcp() {
       host="$1"
@@ -141,17 +153,39 @@
       fi
     }
 
-    if [ -z "$domains" ]; then
-      echo "LAN_PROBE_NO_DOMAIN_TARGET layer=$layer resource=$resource_id"
-      exit 0
+    if [ -z "$domains" ] && [ -z "$ipv4_cidrs" ]; then
+      echo "LAN_PROBE_RESOURCE_HAS_NO_ROUTABLE_TARGETS layer=$layer resource=$resource_id"
+      exit 1
     fi
+
     printf '%s\n' "$domains" | while read -r domain; do
       [ -n "$domain" ] || continue
+      ip="$(resolve_domain "$domain" || true)"
+      if [ -z "$ip" ]; then
+        echo "LAN_PROBE_DNS_FAILED layer=$layer resource=$resource_id domain=$domain"
+        exit 1
+      fi
+      route="$(ip route get "$ip" 2>&1 || true)"
+      if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
+        echo "LAN_PROBE_ROUTE_DECISION_FAILED layer=$layer resource=$resource_id domain=$domain ip=$ip route=$route"
+        exit 1
+      fi
       check_tcp "$domain" "$port" >/dev/null || {
-        echo "LAN_PROBE_TCP_ACCESS_FAILED layer=$layer resource=$resource_id domain=$domain port=$port"
+        echo "LAN_PROBE_TCP_ACCESS_FAILED layer=$layer resource=$resource_id domain=$domain port=$port ip=$ip route=$route"
         exit 1
       }
-      echo "LAN_PROBE_OK layer=$layer resource=$resource_id domain=$domain port=$port"
+      echo "LAN_PROBE_OK layer=$layer resource=$resource_id domain=$domain port=$port ip=$ip route=$(printf '%s' "$route" | tr '\n' ' ')"
+    done
+
+    printf '%s\n' "$ipv4_cidrs" | while read -r cidr; do
+      [ -n "$cidr" ] || continue
+      target="${cidr%%/*}"
+      route="$(ip route get "$target" 2>&1 || true)"
+      if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
+        echo "LAN_PROBE_CIDR_ROUTE_DECISION_FAILED layer=$layer resource=$resource_id cidr=$cidr route=$route"
+        exit 1
+      fi
+      echo "LAN_PROBE_ROUTE_OK layer=$layer resource=$resource_id cidr=$cidr route=$(printf '%s' "$route" | tr '\n' ' ')"
     done
   register: internet_access_healthcheck_lan_probe_result
   changed_when: false
