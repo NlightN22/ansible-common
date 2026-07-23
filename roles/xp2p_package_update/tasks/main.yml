@@ -1,0 +1,12 @@
+---
+- name: Validate XP2P package update context
+  ansible.builtin.assert:
+    that:
+      - xp2p_member_role | default('') in ['hub', 'client']
+      - xp2p_member_platform | default('') in ['linux', 'openwrt', 'windows']
+      - resolved_xp2p_network is defined
+      - resolved_xp2p_network is mapping
+    fail_msg: "XP2P package update requires a resolved XP2P member context."
+
+- name: Update XP2P package for current platform
+  ansible.builtin.include_tasks: "{{ xp2p_member_platform }}.yml"

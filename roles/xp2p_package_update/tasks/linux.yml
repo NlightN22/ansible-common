@@ -1,0 +1,81 @@
+---
+- name: Require Linux XP2P package update version
+  ansible.builtin.assert:
+    that:
+      - xp2p_package_update_release_version | default('') | length > 0
+    fail_msg: "Set xp2p_package_update_expected_version before updating Linux xp2p packages."
+
+- name: Update Linux XP2P package
+  ansible.builtin.raw: |
+    set -eu
+    version='{{ xp2p_package_update_release_version }}'
+    expected_version='{{ xp2p_package_update_expected_version }}'
+    role='{{ xp2p_member_role }}'
+    backup_root='{{ xp2p_package_update_backup_root }}'
+    backup_dir="$backup_root/{{ inventory_hostname }}-$(date +%Y%m%dT%H%M%S%z)"
+    mkdir -p "$backup_dir"
+    current_version="$(xp2p --version 2>&1 | tr -d '\r' | tail -n 1 || true)"
+    service_was_active=false
+    if systemctl is-active --quiet "xp2p-${role}.service"; then service_was_active=true; fi
+    if [ -d /etc/xp2p ]; then cp -a /etc/xp2p "$backup_dir/xp2p"; fi
+    if [ -x /usr/bin/xp2p ]; then cp -a /usr/bin/xp2p "$backup_dir/xp2p.bin"; fi
+    dpkg -l xp2p > "$backup_dir/dpkg-xp2p.txt" 2>&1 || true
+    xp2p "$role" state > "$backup_dir/xp2p-${role}-state.txt" 2>&1 || true
+    printf 'backup_dir=%s\n' "$backup_dir"
+    if [ "$current_version" != "$version" ]; then
+      arch="$(dpkg --print-architecture)"
+      deb="/tmp/xp2p_${version}_${arch}.deb"
+      url="{{ xp2p_package_update_release_base_url }}/v${version}/xp2p_${version}_${arch}.deb"
+      if command -v curl >/dev/null 2>&1; then curl -fsSL "$url" -o "$deb"; else wget -qO "$deb" "$url"; fi
+      dpkg -i "$deb"
+      rm -f "$deb"
+      echo changed=true
+    else
+      echo changed=false
+    fi
+    if [ "$service_was_active" = true ]; then systemctl restart "xp2p-${role}.service"; sleep 5; fi
+    actual_version="$(xp2p --version 2>&1 | tr -d '\r' | tail -n 1)"
+    if [ -n "$expected_version" ] && [ "$actual_version" != "$expected_version" ]; then
+      echo "unexpected xp2p version: expected=$expected_version actual=$actual_version"
+      exit 20
+    fi
+    if [ "$service_was_active" = true ]; then systemctl is-active --quiet "xp2p-${role}.service"; fi
+    {% if xp2p_member_role == 'client' %}
+    endpoint_host='{{ resolved_xp2p_network.endpoint_name }}'
+    outbound_tag='{{ resolved_xp2p_network.outbound_tag }}'
+    health_statuses='{{ xp2p_package_update_health_statuses | join(" ") }}'
+    state="$(xp2p client state 2>&1)"
+    printf '%s\n' "$state"
+    endpoint_line="$(printf '%s\n' "$state" | awk -v tag="$outbound_tag" -v host="$endpoint_host" '$1 == tag || $2 == host { print; exit }')"
+    if [ -z "$endpoint_line" ]; then echo "xp2p endpoint not found"; exit 21; fi
+    endpoint_status="$(printf '%s\n' "$endpoint_line" | awk '{print $3}')"
+    for allowed_status in $health_statuses; do
+      if [ "$endpoint_status" = "$allowed_status" ]; then echo "xp2p_endpoint_health=ok"; exit 0; fi
+    done
+    echo "xp2p endpoint is not healthy: status=$endpoint_status"
+    exit 22
+    {% else %}
+    xp2p server service status
+    echo "xp2p_endpoint_health=ok"
+    {% endif %}
+  register: xp2p_package_update_linux
+  changed_when: "'changed=true' in xp2p_package_update_linux.stdout"
+
+- name: Store Linux XP2P package update backup path
+  ansible.builtin.set_fact:
+    xp2p_package_update_backup_dir: >-
+      {{
+        (
+          xp2p_package_update_linux.stdout_lines
+          | select('match', '^backup_dir=')
+          | list
+          | first
+        ) | regex_replace('^backup_dir=', '')
+      }}
+
+- name: Remove Linux XP2P package update backup after confirmed healthy update
+  ansible.builtin.raw: "rm -rf '{{ xp2p_package_update_backup_dir }}'"
+  changed_when: true
+  when:
+    - xp2p_package_update_cleanup_backups_confirm | bool
+    - "'xp2p_endpoint_health=ok' in xp2p_package_update_linux.stdout"

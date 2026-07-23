@@ -1,0 +1,92 @@
+---
+- name: Capture OpenWrt XP2P package state before update
+  ansible.builtin.raw: |
+    set -eu
+    printf 'timestamp=%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)"
+    opkg list-installed xp2p 2>&1 || true
+    xp2p --version 2>&1 || true
+    xp2p {{ xp2p_member_role }} service status 2>&1 || true
+    xp2p {{ xp2p_member_role }} state 2>&1 || true
+  register: xp2p_package_update_openwrt_before
+  changed_when: false
+
+- name: Back up persistent OpenWrt XP2P directory before package update
+  ansible.builtin.raw: |
+    set -eu
+    backup_root='{{ xp2p_package_update_backup_root }}'
+    backup_dir="$backup_root/{{ inventory_hostname }}-$(date +%Y%m%dT%H%M%S%z)"
+    mkdir -p "$backup_dir"
+    if [ -d /etc/xp2p ]; then cp -a /etc/xp2p "$backup_dir/xp2p"; fi
+    opkg list-installed xp2p > "$backup_dir/opkg-installed-xp2p.txt" 2>&1 || true
+    xp2p --version > "$backup_dir/xp2p-version.txt" 2>&1 || true
+    xp2p {{ xp2p_member_role }} state > "$backup_dir/xp2p-{{ xp2p_member_role }}-state.txt" 2>&1 || true
+    printf 'backup_dir=%s\n' "$backup_dir"
+  register: xp2p_package_update_openwrt_backup
+  changed_when: true
+
+- name: Store OpenWrt XP2P package update backup path
+  ansible.builtin.set_fact:
+    xp2p_package_update_backup_dir: >-
+      {{
+        (
+          xp2p_package_update_openwrt_backup.stdout_lines
+          | select('match', '^backup_dir=')
+          | list
+          | first
+        ) | regex_replace('^backup_dir=', '')
+      }}
+
+- name: Refresh OpenWrt package feeds
+  ansible.builtin.raw: opkg update
+  changed_when: false
+
+- name: Upgrade OpenWrt XP2P package
+  ansible.builtin.raw: opkg upgrade xp2p
+  register: xp2p_package_update_openwrt_upgrade
+  changed_when: "'Upgrading xp2p' in xp2p_package_update_openwrt_upgrade.stdout"
+
+- name: Restart OpenWrt XP2P service after package update
+  ansible.builtin.raw: |
+    set -eu
+    xp2p {{ xp2p_member_role }} service restart
+    sleep 5
+    xp2p {{ xp2p_member_role }} service status
+  changed_when: true
+
+- name: Validate OpenWrt XP2P package update result
+  ansible.builtin.raw: |
+    set -eu
+    expected_version='{{ xp2p_package_update_expected_version }}'
+    actual_version="$(xp2p --version 2>&1 | tr -d '\r' | tail -n 1)"
+    if [ -n "$expected_version" ] && [ "$actual_version" != "$expected_version" ]; then
+      echo "unexpected xp2p version: expected=$expected_version actual=$actual_version"
+      exit 20
+    fi
+    xp2p {{ xp2p_member_role }} service status >/dev/null
+    {% if xp2p_member_role == 'client' %}
+    endpoint_host='{{ resolved_xp2p_network.endpoint_name }}'
+    outbound_tag='{{ resolved_xp2p_network.outbound_tag }}'
+    health_statuses='{{ xp2p_package_update_health_statuses | join(" ") }}'
+    state="$(xp2p client state 2>&1)"
+    printf '%s\n' "$state"
+    endpoint_line="$(printf '%s\n' "$state" | awk -v tag="$outbound_tag" -v host="$endpoint_host" '$1 == tag || $2 == host { print; exit }')"
+    if [ -z "$endpoint_line" ]; then echo "xp2p endpoint not found"; exit 21; fi
+    endpoint_status="$(printf '%s\n' "$endpoint_line" | awk '{print $3}')"
+    for allowed_status in $health_statuses; do
+      if [ "$endpoint_status" = "$allowed_status" ]; then echo "xp2p_endpoint_health=ok"; exit 0; fi
+    done
+    echo "xp2p endpoint is not healthy: status=$endpoint_status"
+    exit 22
+    {% else %}
+    xp2p server state
+    echo "xp2p_endpoint_health=ok"
+    {% endif %}
+  register: xp2p_package_update_openwrt_healthcheck
+  changed_when: false
+
+- name: Remove OpenWrt XP2P package update backup after confirmed healthy update
+  ansible.builtin.raw: "rm -rf '{{ xp2p_package_update_backup_dir }}'"
+  changed_when: true
+  when:
+    - xp2p_package_update_cleanup_backups_confirm | bool
+    - "'xp2p_endpoint_health=ok' in xp2p_package_update_openwrt_healthcheck.stdout"

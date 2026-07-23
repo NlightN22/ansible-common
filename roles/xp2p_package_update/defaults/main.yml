@@ -1,0 +1,10 @@
+---
+xp2p_package_update_expected_version: ""
+xp2p_package_update_release_version: "{{ xp2p_package_update_expected_version }}"
+xp2p_package_update_release_base_url: https://github.com/NlightN22/xray-p2p/releases/download
+xp2p_package_update_backup_root: /etc/ansible-backups/xp2p
+xp2p_package_update_windows_backup_root: C:\ProgramData\ansible-backups\xp2p
+xp2p_package_update_health_statuses:
+  - healthy
+  - alive
+xp2p_package_update_cleanup_backups_confirm: false

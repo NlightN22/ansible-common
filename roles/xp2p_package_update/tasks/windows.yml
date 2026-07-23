@@ -1,0 +1,98 @@
+---
+- name: Require Windows XP2P package update version
+  ansible.builtin.assert:
+    that:
+      - xp2p_package_update_release_version | default('') | length > 0
+    fail_msg: "Set xp2p_package_update_expected_version before updating Windows xp2p packages."
+
+- name: Update Windows XP2P package
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $version = '{{ xp2p_package_update_release_version }}'
+    $expectedVersion = '{{ xp2p_package_update_expected_version }}'
+    $role = '{{ xp2p_member_role }}'
+    $backupRoot = '{{ xp2p_package_update_windows_backup_root }}'
+    $backupDir = Join-Path $backupRoot ('{{ inventory_hostname }}-' + (Get-Date -Format 'yyyyMMddTHHmmsszzz').Replace(':', ''))
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    if (Test-Path -LiteralPath 'C:\ProgramData\xp2p') {
+      Copy-Item -LiteralPath 'C:\ProgramData\xp2p' -Destination (Join-Path $backupDir 'ProgramData-xp2p') -Recurse -Force
+    }
+    if (Test-Path -LiteralPath 'C:\Program Files\xp2p') {
+      Copy-Item -LiteralPath 'C:\Program Files\xp2p' -Destination (Join-Path $backupDir 'ProgramFiles-xp2p') -Recurse -Force
+    }
+    $heartbeatState = 'C:\ProgramData\xp2p\state-heartbeat-client.json'
+    if ($role -eq 'client' -and (Test-Path -LiteralPath $heartbeatState)) {
+      try {
+        Get-Content -LiteralPath $heartbeatState -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop | Out-Null
+      } catch {
+        $corruptState = "$heartbeatState.corrupt-$((Get-Date -Format 'yyyyMMddTHHmmsszzz').Replace(':', ''))"
+        Move-Item -LiteralPath $heartbeatState -Destination $corruptState -Force
+        "renamed_corrupt_heartbeat_state=$corruptState"
+      }
+    }
+    $currentVersion = (& xp2p --version 2>&1 | Select-Object -Last 1).ToString().Trim()
+    $serviceName = "xp2p-$role"
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    $serviceWasRunning = $service -and $service.Status -eq 'Running'
+    "backup_dir=$backupDir"
+    if ($currentVersion -ne $version) {
+      $asset = if ([Environment]::Is64BitOperatingSystem) { "xp2p-$version-windows-amd64.msi" } else { "xp2p-$version-windows-x86.msi" }
+      $msi = Join-Path $env:TEMP $asset
+      Invoke-WebRequest -Uri "{{ xp2p_package_update_release_base_url }}/v$version/$asset" -OutFile $msi
+      $process = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', $msi, '/qn', '/norestart') -Wait -PassThru
+      Remove-Item -LiteralPath $msi -Force
+      if ($process.ExitCode -ne 0) { throw "msiexec failed with exit code $($process.ExitCode)" }
+      "changed=true"
+    } else {
+      "changed=false"
+    }
+    if ($serviceWasRunning) { Restart-Service -Name $serviceName -Force; Start-Sleep -Seconds 5 }
+    $actualVersion = (& xp2p --version 2>&1 | Select-Object -Last 1).ToString().Trim()
+    if ($expectedVersion -and $actualVersion -ne $expectedVersion) {
+      throw "unexpected xp2p version: expected=$expectedVersion actual=$actualVersion"
+    }
+    if ($serviceWasRunning -and (Get-Service -Name $serviceName).Status -ne 'Running') {
+      throw "$serviceName is not running after update"
+    }
+    {% if xp2p_member_role == 'client' %}
+    $state = (& xp2p client state 2>&1) -join [Environment]::NewLine
+    $state
+    $endpointLine = $state -split "`r?`n" | Where-Object {
+      $columns = $_ -split '\s+'
+      $columns.Count -ge 3 -and ($columns[0] -eq '{{ resolved_xp2p_network.outbound_tag }}' -or $columns[1] -eq '{{ resolved_xp2p_network.endpoint_name }}')
+    } | Select-Object -First 1
+    if (-not $endpointLine) {
+      throw "xp2p endpoint not found: {{ resolved_xp2p_network.outbound_tag }}"
+    }
+    $endpointStatus = (($endpointLine -split '\s+') | Select-Object -Index 2)
+    $healthyStatuses = @({{ xp2p_package_update_health_statuses | map('to_json') | join(', ') }})
+    if ($healthyStatuses -notcontains $endpointStatus) {
+      throw "xp2p endpoint is not healthy: status=$endpointStatus"
+    }
+    "xp2p_endpoint_health=ok"
+    {% else %}
+    xp2p server service status
+    "xp2p_endpoint_health=ok"
+    {% endif %}
+  register: xp2p_package_update_windows
+  changed_when: "'changed=true' in xp2p_package_update_windows.stdout"
+
+- name: Store Windows XP2P package update backup path
+  ansible.builtin.set_fact:
+    xp2p_package_update_backup_dir: >-
+      {{
+        (
+          xp2p_package_update_windows.stdout_lines
+          | select('match', '^backup_dir=')
+          | list
+          | first
+        ) | regex_replace('^backup_dir=', '')
+      }}
+
+- name: Remove Windows XP2P package update backup after confirmed healthy update
+  ansible.windows.win_file:
+    path: "{{ xp2p_package_update_backup_dir }}"
+    state: absent
+  when:
+    - xp2p_package_update_cleanup_backups_confirm | bool
+    - "'xp2p_endpoint_health=ok' in xp2p_package_update_windows.stdout"
