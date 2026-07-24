@@ -6,6 +6,16 @@
   ansible.builtin.set_fact:
     three_x_ui_openwrt_healthcheck_failures: []
 
+- name: Select 3x-ui OpenWrt LAN intercept healthcheck mode
+  ansible.builtin.set_fact:
+    three_x_ui_intercept_healthcheck_mode: "{{ three_x_ui_intercept_manual_mode | default('auto') }}"
+
+- name: Validate 3x-ui OpenWrt LAN intercept healthcheck mode
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_intercept_healthcheck_mode in ['auto', 'tunnel', 'public']
+    fail_msg: "three_x_ui_intercept_manual_mode must be auto, tunnel, or public."
+
 - name: Select generated management address observations for egress checks
   ansible.builtin.set_fact:
     management_generated_model: "{{ three_x_ui_openwrt_routing_management_generated_model }}"
@@ -25,13 +35,14 @@
   ansible.builtin.raw: |
     set -eu
     command -v xp2p >/dev/null
+    routing_file='{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
     /etc/init.d/xp2p-client enabled >/dev/null
     /etc/init.d/xp2p-client running >/dev/null
     for file in {% for dat_file in openwrt_xp2p_three_x_ui_routing.dat_files %}'{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ dat_file.name }}' {% endfor %}; do
       test -s "$file"
     done
-    test -s '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
-    grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' >/dev/null
+    test -s "$routing_file"
+    grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' "$routing_file" >/dev/null
     {% set routing_ns = namespace(domains=[], ipv4_cidrs=[]) %}
     {% for route in openwrt_xp2p_three_x_ui_proxy_routes %}
     {% set routing_ns.domains = routing_ns.domains + (route.domains | default([route.fqdn] if route.fqdn is defined else [])) %}
@@ -40,15 +51,24 @@
     {% set route_domains = routing_ns.domains | reject('equalto', '') | unique | list %}
     {% set route_ipv4_cidrs = routing_ns.ipv4_cidrs | reject('equalto', '') | unique | list %}
     {% for domain in route_domains %}
-    grep -A{{ route_domains | length + 2 }} -F -- '"full:{{ domain }}"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
-      grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' >/dev/null
+    if ! grep -F -- '"{{ domain }}"' "$routing_file" >/dev/null 2>&1 &&
+       ! grep -F -- '"full:{{ domain }}"' "$routing_file" >/dev/null 2>&1; then
+      echo "ROUTING_DOMAIN_MISSING domain={{ domain }} outbound={{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
+      exit 1
+    fi
     {% endfor %}
     {% for cidr in route_ipv4_cidrs %}
-    grep -A{{ route_ipv4_cidrs | length + 2 }} -F -- '"{{ cidr }}"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
-      grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' >/dev/null
+    if ! grep -F -- '"{{ cidr }}"' "$routing_file" >/dev/null 2>&1; then
+      echo "ROUTING_CIDR_MISSING cidr={{ cidr }} outbound={{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
+      exit 1
+    fi
     {% endfor %}
-    grep -A3 -F '"network": "tcp,udp"' '{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json' |
-      grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' >/dev/null
+    grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' "$routing_file" >/dev/null
+    grep -F '"network": "tcp,udp"' "$routing_file" >/dev/null
+    if ! grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' "$routing_file" >/dev/null 2>&1; then
+      echo "ROUTING_FINAL_OUTBOUND_MISMATCH expected={{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"
+      exit 1
+    fi
   register: openwrt_xp2p_three_x_ui_routing_state_healthcheck
   changed_when: false
   failed_when: false
@@ -155,6 +175,7 @@
     rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default("xp2pc_lan_intercept") }}'
     route_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default("xp2pc_lan_intercept_default") }}'
     failover_enabled='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.enabled | default(false) | bool | lower }}'
+    healthcheck_mode='{{ three_x_ui_intercept_healthcheck_mode }}'
     test "$(uci -q get "firewall.${private_set_name}")" = ipset
     test "$(uci -q get "firewall.${private_set_name}.name")" = "$private_set_name"
     test "$(uci -q get "firewall.${private_set_name}.match")" = dest_net
@@ -251,6 +272,9 @@
     rule_disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
     route_disabled="$(uci -q get "network.${route_name}.disabled" 2>/dev/null || true)"
     if [ "$rule_disabled" = "1" ] || [ "$rule_disabled" = "true" ]; then
+      if [ "$healthcheck_mode" = "public" ]; then
+        exit 0
+      fi
       if [ "$failover_enabled" = "true" ]; then
         exit 0
       fi
@@ -258,6 +282,9 @@
       exit 1
     fi
     if [ "$route_disabled" = "1" ] || [ "$route_disabled" = "true" ]; then
+      if [ "$healthcheck_mode" = "public" ]; then
+        exit 0
+      fi
       echo "LAN_INTERCEPT_NETWORK_ROUTE_DISABLED section=${route_name}"
       exit 1
     fi
@@ -345,6 +372,7 @@
   when:
     - openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) | bool
     - openwrt_xp2p_three_x_ui_routing.intercept.failover.enabled | default(false) | bool
+    - three_x_ui_intercept_healthcheck_mode == 'auto'
 
 - name: Record 3x-ui OpenWrt LAN intercept failover healthcheck failure
   ansible.builtin.set_fact:

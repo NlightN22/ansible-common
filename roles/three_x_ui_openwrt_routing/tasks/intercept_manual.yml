@@ -43,7 +43,7 @@
       fi
 
       if [ "$mode" = tunnel ]; then
-        uci -q delete "network.${rule_name}.disabled" || true
+        uci set "network.${rule_name}.disabled=0"
         uci set "network.${rule_name}.lookup=${table}"
         uci set "network.${rule_name}.mark=${mark}/0xffffffff"
         uci set "network.${route_name}.disabled=0"
@@ -59,6 +59,9 @@
 
       uci commit network
       /etc/init.d/network reload
+      if [ -x "$service_path" ]; then
+        "$service_path" stop >/dev/null 2>&1 || true
+      fi
     fi
 
     echo "changed=$changed"
@@ -67,6 +70,7 @@
     echo "FAILOVER_STATUS=$([ -x "$service_path" ] && "$service_path" status 2>/dev/null || echo missing)"
     echo "RULE_DISABLED=$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || echo 0)"
     echo "ROUTE_DISABLED=$(uci -q get "network.${route_name}.disabled" 2>/dev/null || echo 0)"
+    echo "LIVE_RULE=$(ip rule show 2>/dev/null | grep -F "fwmark ${mark}" | grep -F "lookup ${table}" || true)"
     echo "TABLE_ROUTE=$(ip route show table "$table" 2>/dev/null | sed -n '1p')"
   register: three_x_ui_intercept_manual_apply
   changed_when: "'changed=true' in three_x_ui_intercept_manual_apply.stdout"

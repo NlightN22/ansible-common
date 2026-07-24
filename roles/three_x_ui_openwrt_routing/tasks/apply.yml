@@ -171,6 +171,11 @@
     - name: Install 3x-ui OpenWrt LAN intercept failover after intercept apply
       ansible.builtin.include_tasks: intercept_failover.yml
 
+    - name: Apply 3x-ui OpenWrt LAN intercept manual mode after failover install
+      ansible.builtin.include_tasks: intercept_manual.yml
+      when:
+        - three_x_ui_intercept_manual_mode | default('auto') != 'auto'
+
     - name: Reset SSH connection after 3x-ui OpenWrt LAN intercept and failover apply
       ansible.builtin.meta: reset_connection
 
