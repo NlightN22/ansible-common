@@ -47,10 +47,30 @@
   ansible.builtin.assert:
     that:
       - item.user in xp2p_hub_state.stdout
-      - item.client_ip in xp2p_hub_state.stdout
       - item.user in xp2p_hub_users.stdout
     fail_msg: "Expected XP2P client {{ item.user }} is missing from hub state or user list."
   loop: "{{ xp2p_hub_network.clients }}"
+
+- name: Validate expected xp2p clients are healthy on hub
+  ansible.builtin.raw: |
+    set -eu
+    user='{{ item.user }}'
+    state="$(xp2p server state 2>&1)"
+    printf '%s\n' "$state"
+    endpoint_line="$(printf '%s\n' "$state" | awk -v user="$user" '$7 == user { print; exit }')"
+    if [ -z "$endpoint_line" ]; then
+      echo "xp2p client not found in hub state: user=$user"
+      exit 21
+    fi
+    endpoint_status="$(printf '%s\n' "$endpoint_line" | awk '{print $3}')"
+    if [ "$endpoint_status" = healthy ] || [ "$endpoint_status" = alive ]; then
+      echo "xp2p_client_health=ok"
+      exit 0
+    fi
+    echo "xp2p client is not healthy on hub: user=$user status=$endpoint_status"
+    exit 22
+  loop: "{{ xp2p_hub_network.clients }}"
+  changed_when: false
 
 - name: Validate xp2p server service is running
   ansible.builtin.assert:

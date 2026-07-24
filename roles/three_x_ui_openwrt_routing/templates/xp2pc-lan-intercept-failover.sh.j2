@@ -37,13 +37,20 @@ socks_smoke_alive() {
     -fsS --connect-timeout 3 --max-time 5 2ip.me >/dev/null 2>&1
 }
 
+transport_status() {
+  state="$(xp2p client state 2>/dev/null || true)"
+  status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+  [ -n "$status" ] || status=missing
+  printf '%s\n' "$status"
+}
+
 transport_alive() {
   ip link show "$transport_interface" >/dev/null 2>&1 || return 1
   route_table_has_default || return 1
   socks_smoke_alive || return 1
 
-  state="$(xp2p client state 2>/dev/null || true)"
-  printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'
+  status="$(transport_status)"
+  [ "$status" = healthy ] || [ "$status" = alive ]
 }
 
 transport_dead() {
@@ -51,12 +58,9 @@ transport_dead() {
   route_table_has_default || return 0
   socks_smoke_alive || return 0
 
-  state="$(xp2p client state 2>/dev/null || true)"
-  if printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)'; then
-    return 0
-  fi
-
-  if ! printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+  status="$(transport_status)"
+  if [ "$status" = unhealthy ] || [ "$status" = not-detected ] ||
+     [ "$status" = disabled ] || [ "$status" = dead ] || [ "$status" = missing ]; then
     return 0
   fi
 

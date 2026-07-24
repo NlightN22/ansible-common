@@ -308,14 +308,17 @@
     disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
     alive=false
     dead=false
+    endpoint_status="$(printf '%s\n' "$state" | awk -v tag="$outbound_tag" '$1 == tag { print $3; exit }')"
+    [ -n "$endpoint_status" ] || endpoint_status=missing
 
     if ip link show "$xp2pc_if" >/dev/null 2>&1 &&
        ip route show table "$table" 2>/dev/null | grep -E '^default([[:space:]]|$)' | grep -F " dev ${xp2pc_if}" >/dev/null &&
-       printf '%s\n' "$state" | grep -F "$outbound_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+       { [ "$endpoint_status" = healthy ] || [ "$endpoint_status" = alive ]; }; then
       alive=true
     elif ! ip link show "$xp2pc_if" >/dev/null 2>&1 ||
-         printf '%s\n' "$state" | grep -F "$outbound_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)' ||
-         ! printf '%s\n' "$state" | grep -F "$outbound_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+         [ "$endpoint_status" = unhealthy ] || [ "$endpoint_status" = not-detected ] ||
+         [ "$endpoint_status" = disabled ] || [ "$endpoint_status" = dead ] ||
+         [ "$endpoint_status" = missing ]; then
       dead=true
     fi
 
@@ -333,7 +336,7 @@
         exit 1
       fi
     else
-      echo "LAN_INTERCEPT_FAILOVER_STATE_INCONCLUSIVE outbound=${outbound_tag}"
+      echo "LAN_INTERCEPT_FAILOVER_STATE_INCONCLUSIVE outbound=${outbound_tag} status=${endpoint_status}"
       exit 1
     fi
   register: openwrt_xp2p_three_x_ui_intercept_failover_healthcheck

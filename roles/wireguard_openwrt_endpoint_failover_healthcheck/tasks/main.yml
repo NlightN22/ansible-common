@@ -41,11 +41,14 @@
       fi
     }
     detect_xp2p_status() {
+      endpoint_status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+      [ -n "$endpoint_status" ] || endpoint_status=missing
       if ip link show "$transport_interface" >/dev/null 2>&1 &&
-         printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+         { [ "$endpoint_status" = healthy ] || [ "$endpoint_status" = alive ]; }; then
         xp2p_status=alive
-      elif printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)' ||
-           ! printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+      elif [ "$endpoint_status" = unhealthy ] || [ "$endpoint_status" = not-detected ] ||
+           [ "$endpoint_status" = disabled ] || [ "$endpoint_status" = dead ] ||
+           [ "$endpoint_status" = missing ]; then
         xp2p_status=dead
       else
         xp2p_status=unknown

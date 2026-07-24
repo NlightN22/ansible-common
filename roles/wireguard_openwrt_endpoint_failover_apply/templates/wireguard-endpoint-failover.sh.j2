@@ -95,21 +95,25 @@ delete_duplicate_route_sections() {
     done
 }
 
+transport_status() {
+  state="$(xp2p client state 2>/dev/null || true)"
+  status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+  [ -n "$status" ] || status=missing
+  printf '%s\n' "$status"
+}
+
 transport_alive() {
   ip link show "$transport_interface" >/dev/null 2>&1 || return 1
 
-  state="$(xp2p client state 2>/dev/null || true)"
-  printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'
+  status="$(transport_status)"
+  [ "$status" = healthy ] || [ "$status" = alive ]
 }
 
 transport_dead() {
-  state="$(xp2p client state 2>/dev/null || true)"
+  status="$(transport_status)"
 
-  if printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])dead([[:space:]]|$)'; then
-    return 0
-  fi
-
-  if ! printf '%s\n' "$state" | grep -F "$transport_tag" | grep -Eq '(^|[[:space:]])alive([[:space:]]|$)'; then
+  if [ "$status" = unhealthy ] || [ "$status" = not-detected ] ||
+     [ "$status" = disabled ] || [ "$status" = dead ] || [ "$status" = missing ]; then
     return 0
   fi
 

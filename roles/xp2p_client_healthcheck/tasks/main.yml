@@ -32,6 +32,53 @@
   register: xp2p_client_state
   changed_when: false
 
+- name: Validate xp2p client endpoint status on POSIX clients
+  ansible.builtin.raw: |
+    set -eu
+    outbound_tag='{{ xp2p_client_network.outbound_tag }}'
+    endpoint_name='{{ xp2p_client_network.endpoint_name }}'
+    state="$(xp2p client state 2>&1)"
+    printf '%s\n' "$state"
+    endpoint_line="$(printf '%s\n' "$state" | awk -v tag="$outbound_tag" -v host="$endpoint_name" '$1 == tag || $2 == host { print; exit }')"
+    if [ -z "$endpoint_line" ]; then
+      echo "xp2p endpoint not found: tag=$outbound_tag host=$endpoint_name"
+      exit 21
+    fi
+    endpoint_status="$(printf '%s\n' "$endpoint_line" | awk '{print $3}')"
+    if [ "$endpoint_status" = healthy ] || [ "$endpoint_status" = alive ]; then
+      echo "xp2p_endpoint_health=ok"
+      exit 0
+    fi
+    echo "xp2p endpoint is not healthy: status=$endpoint_status"
+    exit 22
+  register: xp2p_client_endpoint_health_posix
+  changed_when: false
+  when: xp2p_member_platform != 'windows'
+
+- name: Validate xp2p client endpoint status on Windows clients
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $outboundTag = '{{ xp2p_client_network.outbound_tag }}'
+    $endpointName = '{{ xp2p_client_network.endpoint_name }}'
+    $state = (& xp2p client state 2>&1) -join [Environment]::NewLine
+    $state
+    $endpointLine = $state -split "`r?`n" | Where-Object {
+      $columns = $_ -split '\s+'
+      $columns.Count -ge 3 -and ($columns[0] -eq $outboundTag -or $columns[1] -eq $endpointName)
+    } | Select-Object -First 1
+    if (-not $endpointLine) {
+      throw "xp2p endpoint not found: tag=$outboundTag host=$endpointName"
+    }
+    $endpointStatus = (($endpointLine -split '\s+') | Select-Object -Index 2)
+    if ($endpointStatus -eq 'healthy' -or $endpointStatus -eq 'alive') {
+      "xp2p_endpoint_health=ok"
+    } else {
+      throw "xp2p endpoint is not healthy: status=$endpointStatus"
+    }
+  register: xp2p_client_endpoint_health_windows
+  changed_when: false
+  when: xp2p_member_platform == 'windows'
+
 - name: Collect xp2p client redirects
   ansible.builtin.raw: xp2p client redirect list
   register: xp2p_client_redirects_state
@@ -41,6 +88,11 @@
   ansible.builtin.assert:
     that:
       - xp2p_client_service_status.stdout is search('(?i)(running|active|enabled)')
-      - xp2p_client_network.outbound_tag in xp2p_client_state.stdout or xp2p_client_network.endpoint_name in xp2p_client_state.stdout
+      - >-
+        'xp2p_endpoint_health=ok' in
+        (
+          xp2p_client_endpoint_health_windows.stdout
+          | default(xp2p_client_endpoint_health_posix.stdout | default(''))
+        )
       - xp2p_client_expected_redirects | map(attribute='cidr') | select('in', xp2p_client_redirects_state.stdout) | list | length == xp2p_client_expected_redirects | length
     fail_msg: "XP2P client healthcheck failed on {{ inventory_hostname }}."
