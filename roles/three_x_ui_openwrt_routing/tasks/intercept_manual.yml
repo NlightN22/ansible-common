@@ -1,0 +1,72 @@
+---
+- name: Validate 3x-ui OpenWrt LAN intercept manual mode
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_intercept_manual_mode in ['tunnel', 'public', 'auto']
+      - openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.intercept.route_section | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.intercept.table | default('') | string | length > 0
+      - openwrt_xp2p_three_x_ui_routing.intercept.interface | default('') | length > 0
+    fail_msg: "3x-ui OpenWrt LAN intercept manual mode requires a valid routing model and mode tunnel, public, or auto."
+
+- name: Apply 3x-ui OpenWrt LAN intercept manual mode
+  ansible.builtin.raw: |
+    set -eu
+    mode='{{ three_x_ui_intercept_manual_mode }}'
+    service_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.service_path | default("/etc/init.d/xp2pc-lan-intercept-failover") }}'
+    rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section }}'
+    route_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section }}'
+    table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table }}'
+    mark='{{ openwrt_xp2p_three_x_ui_routing.intercept.fwmark | default("0x66") }}'
+    xp2pc_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.interface }}'
+    changed=false
+
+    service_enabled=false
+    if [ -x "$service_path" ] && "$service_path" enabled >/dev/null 2>&1; then
+      service_enabled=true
+    fi
+
+    rule_disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
+    route_disabled="$(uci -q get "network.${route_name}.disabled" 2>/dev/null || true)"
+
+    if [ "$mode" = auto ]; then
+      if [ -x "$service_path" ]; then
+        "$service_path" enable
+        "$service_path" start >/dev/null 2>&1 || "$service_path" restart
+        changed=true
+      fi
+    else
+      if [ -x "$service_path" ]; then
+        "$service_path" stop >/dev/null 2>&1 || true
+        "$service_path" disable >/dev/null 2>&1 || true
+        [ "$service_enabled" = false ] || changed=true
+      fi
+
+      if [ "$mode" = tunnel ]; then
+        uci -q delete "network.${rule_name}.disabled" || true
+        uci set "network.${rule_name}.lookup=${table}"
+        uci set "network.${rule_name}.mark=${mark}/0xffffffff"
+        uci set "network.${route_name}.disabled=0"
+        uci set "network.${route_name}.table=${table}"
+        uci set "network.${route_name}.interface=${xp2pc_if}"
+        uci set "network.${route_name}.target=0.0.0.0/0"
+        [ "$rule_disabled" != "1" ] && [ "$rule_disabled" != "true" ] &&
+          [ "$route_disabled" != "1" ] && [ "$route_disabled" != "true" ] || changed=true
+      else
+        uci set "network.${rule_name}.disabled=1"
+        [ "$rule_disabled" = "1" ] || [ "$rule_disabled" = "true" ] || changed=true
+      fi
+
+      uci commit network
+      /etc/init.d/network reload
+    fi
+
+    echo "changed=$changed"
+    echo "MANUAL_MODE=$mode"
+    echo "FAILOVER_ENABLED=$([ -x "$service_path" ] && "$service_path" enabled >/dev/null 2>&1 && echo true || echo false)"
+    echo "FAILOVER_STATUS=$([ -x "$service_path" ] && "$service_path" status 2>/dev/null || echo missing)"
+    echo "RULE_DISABLED=$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || echo 0)"
+    echo "ROUTE_DISABLED=$(uci -q get "network.${route_name}.disabled" 2>/dev/null || echo 0)"
+    echo "TABLE_ROUTE=$(ip route show table "$table" 2>/dev/null | sed -n '1p')"
+  register: three_x_ui_intercept_manual_apply
+  changed_when: "'changed=true' in three_x_ui_intercept_manual_apply.stdout"
