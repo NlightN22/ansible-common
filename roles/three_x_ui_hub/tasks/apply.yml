@@ -87,17 +87,18 @@
     three_x_ui_hub_star_client_emails: "{{ three_x_ui_hub_star.clients | rejectattr('state', 'equalto', 'absent') | map(attribute='email') | list }}"
     three_x_ui_hub_managed_client_comment: "{{ three_x_ui_hub_client_comment | default('managed by infra-ansible') }}"
 
-- name: Initialize 3x-ui managed client metadata updates
+- name: Initialize 3x-ui managed client updates
   ansible.builtin.set_fact:
-    three_x_ui_hub_clients_requiring_comment_update: []
+    three_x_ui_hub_clients_requiring_update: []
 
-- name: Select 3x-ui clients requiring managed comment update
+- name: Select 3x-ui clients requiring managed state update
   ansible.builtin.set_fact:
-    three_x_ui_hub_clients_requiring_comment_update: >-
+    three_x_ui_hub_clients_requiring_update: >-
       {{
-        three_x_ui_hub_clients_requiring_comment_update
+        three_x_ui_hub_clients_requiring_update
         + [
           item | combine({
+            'enable': true,
             'comment': three_x_ui_hub_managed_client_comment,
             'updated_at': ansible_date_time.epoch ~ '000'
           })
@@ -106,7 +107,7 @@
   loop: "{{ three_x_ui_hub_current_clients }}"
   when:
     - item.email in three_x_ui_hub_star_client_emails
-    - item.comment | default('') != three_x_ui_hub_managed_client_comment
+    - item.comment | default('') != three_x_ui_hub_managed_client_comment or not (item.enable | default(true) | bool)
   no_log: true
 
 - name: Select missing 3x-ui star clients
@@ -165,7 +166,7 @@
   no_log: true
   delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
 
-- name: Update managed comments on existing 3x-ui Trojan clients
+- name: Update managed state on existing 3x-ui Trojan clients
   ansible.builtin.uri:
     url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/updateClient/{{ item.password }}"
     method: POST
@@ -188,7 +189,7 @@
   register: three_x_ui_hub_update_client_results
   changed_when: three_x_ui_hub_update_client_results.json.success | default(false) | bool
   failed_when: not (three_x_ui_hub_update_client_results.json.success | default(false) | bool)
-  loop: "{{ three_x_ui_hub_clients_requiring_comment_update }}"
+  loop: "{{ three_x_ui_hub_clients_requiring_update }}"
   no_log: true
   delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
 
@@ -236,6 +237,14 @@
   loop: "{{ three_x_ui_hub_star.clients }}"
   no_log: true
 
+- name: Validate all 3x-ui star clients are enabled
+  ansible.builtin.assert:
+    that:
+      - (three_x_ui_hub_final_clients | selectattr('email', 'equalto', item.email) | first).enable | bool
+    fail_msg: "Expected 3x-ui client {{ item.email }} to be enabled after apply."
+  loop: "{{ three_x_ui_hub_star.clients }}"
+  no_log: true
+
 - name: Apply 3x-ui hub runtime local SOCKS inbound
   ansible.builtin.include_tasks: local_socks_apply.yml
 
@@ -247,5 +256,5 @@
     msg: >-
       3x-ui star {{ three_x_ui_hub_star.id }} on {{ inventory_hostname }}:
       {{ three_x_ui_hub_missing_clients | length }} client(s) added,
-      {{ three_x_ui_hub_clients_requiring_comment_update | length }} client comment(s) updated,
+      {{ three_x_ui_hub_clients_requiring_update | length }} existing client(s) updated,
       {{ three_x_ui_hub_final_client_emails | length }} client(s) currently present in inbound {{ three_x_ui_hub_star.panel.inbound_id }}.

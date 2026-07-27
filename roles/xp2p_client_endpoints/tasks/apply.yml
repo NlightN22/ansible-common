@@ -161,5 +161,34 @@
     or xp2p_client_endpoint_reinstalls is changed
     or xp2p_client_endpoint_heartbeat_modes is changed
 
+- name: Reset XP2P client heartbeat capability cache
+  ansible.builtin.raw: |
+    set -eu
+    state_path='{{ xp2p_client_endpoints_state_heartbeat_client_path }}'
+    service_name='{{ xp2p_client_endpoints_service_name }}'
+    if [ -x "/etc/init.d/${service_name}" ]; then
+      "/etc/init.d/${service_name}" stop || true
+    elif command -v systemctl >/dev/null 2>&1; then
+      systemctl stop "${service_name}" || true
+    fi
+    if [ -f "$state_path" ]; then
+      cp -a "$state_path" "${state_path}.before-capability-reset-$(date +%Y%m%dT%H%M%S)"
+      rm -f "$state_path"
+      echo "XP2P_HEARTBEAT_CAPABILITY_CACHE_RESET"
+    fi
+    if [ -x "/etc/init.d/${service_name}" ]; then
+      "/etc/init.d/${service_name}" start
+    elif command -v systemctl >/dev/null 2>&1; then
+      systemctl start "${service_name}"
+    fi
+  register: xp2p_client_endpoint_heartbeat_cache_reset
+  changed_when: "'XP2P_HEARTBEAT_CAPABILITY_CACHE_RESET' in xp2p_client_endpoint_heartbeat_cache_reset.stdout"
+  when: xp2p_client_endpoints_reset_heartbeat_capability_cache | bool
+
+- name: Wait for xp2p client heartbeat capability rediscovery
+  ansible.builtin.pause:
+    seconds: "{{ xp2p_client_endpoints_settle_seconds }}"
+  when: xp2p_client_endpoint_heartbeat_cache_reset is changed
+
 - name: Run XP2P client endpoint healthcheck after apply
   ansible.builtin.include_tasks: healthcheck.yml

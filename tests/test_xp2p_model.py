@@ -285,7 +285,7 @@ class XP2PModelTests(unittest.TestCase):
             "user": "AB-Zavodskaya",
             "replace": True,
         }
-        current = "proxy-dcpkt2-ddns-net OLD-CLIENT"
+        current = "dcpkt2.ddns.net  proxy-dcpkt2-ddns-net  109.71.242.190  443  AB-Zavodskaya  false  dcpkt2.ddns.net"
 
         plan = self.module.xp2p_client_endpoint_apply_plan([intent], current)
 

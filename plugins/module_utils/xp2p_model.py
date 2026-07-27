@@ -300,6 +300,9 @@ def xp2p_client_endpoint_apply_plan(intents: Any, current_endpoint_output: Any) 
             if tag_present:
                 plan["absent"].append(intent)
             continue
+        if tag_present and bool(intent.get("replace", False)):
+            plan["replacements"].append(intent)
+            continue
 
         identity_present = any(
             record.get("tag") == tag and str(record.get("user") or "") == user for record in current_records
