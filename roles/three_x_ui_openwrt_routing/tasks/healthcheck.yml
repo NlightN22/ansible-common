@@ -331,11 +331,18 @@
     "$service_path" running
     logread 2>/dev/null | grep -F "$instance_name" >/dev/null
 
-    state="$(xp2p client state 2>/dev/null || true)"
     disabled="$(uci -q get "network.${rule_name}.disabled" 2>/dev/null || true)"
     alive=false
     dead=false
-    endpoint_status="$(printf '%s\n' "$state" | awk -v tag="$outbound_tag" '$1 == tag { print $3; exit }')"
+    endpoint_status=''
+    if command -v jsonfilter >/dev/null 2>&1; then
+      state_json="$(xp2p client state --json 2>/dev/null || true)"
+      endpoint_status="$(printf '%s\n' "$state_json" | jsonfilter -e "@.result.tunnels[@.tag='${outbound_tag}'].status" 2>/dev/null | head -n 1)"
+    fi
+    if [ -z "$endpoint_status" ]; then
+      state="$(xp2p client state 2>/dev/null || true)"
+      endpoint_status="$(printf '%s\n' "$state" | awk -v tag="$outbound_tag" '$1 == tag { print $3; exit }')"
+    fi
     [ -n "$endpoint_status" ] || endpoint_status=missing
 
     if ip link show "$xp2pc_if" >/dev/null 2>&1 &&

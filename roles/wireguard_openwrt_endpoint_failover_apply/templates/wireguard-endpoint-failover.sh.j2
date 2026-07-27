@@ -96,8 +96,15 @@ delete_duplicate_route_sections() {
 }
 
 transport_status() {
-  state="$(xp2p client state 2>/dev/null || true)"
-  status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+  status=''
+  if command -v jsonfilter >/dev/null 2>&1; then
+    state_json="$(xp2p client state --json 2>/dev/null || true)"
+    status="$(printf '%s\n' "$state_json" | jsonfilter -e "@.result.tunnels[@.tag='${transport_tag}'].status" 2>/dev/null | head -n 1)"
+  fi
+  if [ -z "$status" ]; then
+    state="$(xp2p client state 2>/dev/null || true)"
+    status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+  fi
   [ -n "$status" ] || status=missing
   printf '%s\n' "$status"
 }

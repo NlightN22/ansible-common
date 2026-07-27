@@ -41,7 +41,13 @@
       fi
     }
     detect_xp2p_status() {
-      endpoint_status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+      endpoint_status=''
+      if command -v jsonfilter >/dev/null 2>&1; then
+        endpoint_status="$(printf '%s\n' "$state_json" | jsonfilter -e "@.result.tunnels[@.tag='${transport_tag}'].status" 2>/dev/null | head -n 1)"
+      fi
+      if [ -z "$endpoint_status" ]; then
+        endpoint_status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+      fi
       [ -n "$endpoint_status" ] || endpoint_status=missing
       if ip link show "$transport_interface" >/dev/null 2>&1 &&
          { [ "$endpoint_status" = healthy ] || [ "$endpoint_status" = alive ]; }; then
@@ -100,6 +106,7 @@
     echo '### xp2p client service status'
     xp2p client service status || rc=1
     echo '### xp2p client state'
+    state_json="$(xp2p client state --json 2>/dev/null || true)"
     state="$(xp2p client state 2>&1)"
     state_rc="$?"
     printf '%s\n' "$state"
@@ -130,6 +137,7 @@
     if [ "$route_expectation" != ok ] && [ "$xp2p_status" != unknown ]; then
       echo "ROUTE_EXPECTATION_TRANSITION=waiting_${switch_delay_seconds}s"
       sleep "$switch_delay_seconds"
+      state_json="$(xp2p client state --json 2>/dev/null || true)"
       state="$(xp2p client state 2>&1)"
       printf '%s\n' "$state"
       collect_route_state
