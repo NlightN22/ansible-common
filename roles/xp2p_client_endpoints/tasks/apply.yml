@@ -97,6 +97,61 @@
         | length == 0
     fail_msg: "XP2P client endpoint additive install failed for at least one missing endpoint."
 
+- name: Reconcile XP2P client endpoint health settings
+  ansible.builtin.raw: |
+    set -eu
+    config_path='{{ xp2p_client_endpoints_config_path }}'
+    tag='{{ item.tag }}'
+    heartbeat_mode='{{ item.heartbeat_mode | default("") }}'
+    allow_insecure='{{ (item.allow_insecure | bool | ternary("true", "false")) if item.allow_insecure is defined else "" }}'
+    [ -n "$heartbeat_mode" ] || [ -n "$allow_insecure" ] || exit 0
+    [ -f "$config_path" ] || exit 0
+    tmp_path="${config_path}.health-settings.$$"
+    awk -v tag="$tag" -v heartbeat_mode="$heartbeat_mode" -v allow_insecure="$allow_insecure" '
+      function set_field(record, name, value) {
+        if (value == "") {
+          return record
+        }
+        pattern = name "[[:space:]]*=[[:space:]]*([^,}]+)"
+        replacement = name " = " value
+        if (record ~ pattern) {
+          sub(pattern, replacement, record)
+        } else {
+          sub(/[[:space:]]*}$/, ", " replacement " }", record)
+        }
+        return record
+      }
+      function patch_record(record) {
+        if (record ~ "tag = \"" tag "\"") {
+          record = set_field(record, "heartbeat_mode", "\"" heartbeat_mode "\"")
+          record = set_field(record, "allow_insecure", allow_insecure)
+        }
+        return record
+      }
+      {
+        rest = $0
+        output = ""
+        while (match(rest, /\{[^{}]*tag = "[^"]+"[^{}]*\}/)) {
+          output = output substr(rest, 1, RSTART - 1) patch_record(substr(rest, RSTART, RLENGTH))
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        print output rest
+      }
+    ' "$config_path" > "$tmp_path"
+    if cmp -s "$config_path" "$tmp_path"; then
+      rm "$tmp_path"
+      exit 0
+    fi
+    cp -a "$config_path" "${config_path}.before-health-settings-$(date +%Y%m%dT%H%M%S)"
+    mv "$tmp_path" "$config_path"
+    echo "XP2P_ENDPOINT_HEALTH_SETTINGS_CHANGED"
+  loop: "{{ xp2p_client_endpoints | selectattr('state', 'equalto', 'present') | list }}"
+  loop_control:
+    label: "{{ item.source }} {{ item.tag }}"
+  register: xp2p_client_endpoint_heartbeat_modes
+  changed_when: "'XP2P_ENDPOINT_HEALTH_SETTINGS_CHANGED' in xp2p_client_endpoint_heartbeat_modes.stdout"
+  no_log: true
+
 - name: Wait for xp2p client endpoint config watcher to settle
   ansible.builtin.pause:
     seconds: "{{ xp2p_client_endpoints_settle_seconds }}"
@@ -104,6 +159,7 @@
     xp2p_client_endpoint_absent_remove is changed
     or xp2p_client_endpoint_additive_installs is changed
     or xp2p_client_endpoint_reinstalls is changed
+    or xp2p_client_endpoint_heartbeat_modes is changed
 
 - name: Run XP2P client endpoint healthcheck after apply
   ansible.builtin.include_tasks: healthcheck.yml

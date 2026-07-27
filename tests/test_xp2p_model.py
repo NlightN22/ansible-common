@@ -161,6 +161,11 @@ class XP2PModelTests(unittest.TestCase):
             },
         )
         self.assertEqual(
+            next(intent for intent in intents if intent["source"] == "three_x_ui:overlay-a")["heartbeat_mode"],
+            "auto",
+        )
+        self.assertFalse(next(intent for intent in intents if intent["source"] == "three_x_ui:overlay-a")["allow_insecure"])
+        self.assertEqual(
             self.module.xp2p_client_endpoint_tags(intents),
             ["proxy-overlay-a-example-test", "proxy-relay-a-example-test"],
         )

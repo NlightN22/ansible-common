@@ -167,6 +167,8 @@ def _endpoint_intent_from_xray_overlay(network_id: str, network: dict[str, Any],
         "protocol": panel.get("protocol") or network.get("protocol") or source.get("protocol") or "trojan",
         "source": f"three_x_ui:{network_id}",
         "state": client.get("state", "present"),
+        "heartbeat_mode": endpoint.get("heartbeat_mode") or network.get("heartbeat_mode") or source.get("heartbeat_mode") or "auto",
+        "allow_insecure": endpoint.get("allow_insecure", network.get("allow_insecure", source.get("allow_insecure", False))),
     }
 
 

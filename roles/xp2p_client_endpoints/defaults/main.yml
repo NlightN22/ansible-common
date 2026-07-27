@@ -1,4 +1,5 @@
 ---
 xp2p_client_endpoints_operation: healthcheck
 xp2p_client_endpoints: "{{ resolved_xp2p_client_endpoints | default([]) }}"
+xp2p_client_endpoints_config_path: /etc/xp2p/xp2p-client.toml
 xp2p_client_endpoints_settle_seconds: 15
