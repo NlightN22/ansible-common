@@ -12,6 +12,23 @@
     $expectedVersion = '{{ xp2p_package_update_expected_version }}'
     $role = '{{ xp2p_member_role }}'
     $backupRoot = '{{ xp2p_package_update_windows_backup_root }}'
+    function Invoke-Xp2pText {
+      param([string[]]$Arguments)
+      $previousErrorActionPreference = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        $output = & xp2p @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+      } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+      }
+      $text = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+      if ($exitCode -ne 0) {
+        if ($text) { $text }
+        throw "xp2p $($Arguments -join ' ') failed with exit code $exitCode"
+      }
+      return $text
+    }
     $backupDir = Join-Path $backupRoot ('{{ inventory_hostname }}-' + (Get-Date -Format 'yyyyMMddTHHmmsszzz').Replace(':', ''))
     New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
     if (Test-Path -LiteralPath 'C:\ProgramData\xp2p') {
@@ -30,7 +47,7 @@
         "renamed_corrupt_heartbeat_state=$corruptState"
       }
     }
-    $currentVersion = (& xp2p --version 2>&1 | Select-Object -Last 1).ToString().Trim()
+    $currentVersion = ((Invoke-Xp2pText -Arguments @('--version')) -split "`r?`n" | Select-Object -Last 1).Trim()
     $serviceName = "xp2p-$role"
     $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     $serviceWasRunning = $service -and $service.Status -eq 'Running'
@@ -47,7 +64,7 @@
       "changed=false"
     }
     if ($serviceWasRunning) { Restart-Service -Name $serviceName -Force; Start-Sleep -Seconds 5 }
-    $actualVersion = (& xp2p --version 2>&1 | Select-Object -Last 1).ToString().Trim()
+    $actualVersion = ((Invoke-Xp2pText -Arguments @('--version')) -split "`r?`n" | Select-Object -Last 1).Trim()
     if ($expectedVersion -and $actualVersion -ne $expectedVersion) {
       throw "unexpected xp2p version: expected=$expectedVersion actual=$actualVersion"
     }
@@ -55,7 +72,7 @@
       throw "$serviceName is not running after update"
     }
     {% if xp2p_member_role == 'client' %}
-    $state = (& xp2p client state 2>&1) -join [Environment]::NewLine
+    $state = Invoke-Xp2pText -Arguments @('client', 'state')
     $state
     $endpointLine = $state -split "`r?`n" | Where-Object {
       $columns = $_ -split '\s+'

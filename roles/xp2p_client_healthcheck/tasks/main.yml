@@ -58,9 +58,26 @@
 - name: Validate xp2p client endpoint status on Windows clients
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
+    function Invoke-Xp2pText {
+      param([string[]]$Arguments)
+      $previousErrorActionPreference = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        $output = & xp2p @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+      } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+      }
+      $text = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+      if ($exitCode -ne 0) {
+        if ($text) { $text }
+        throw "xp2p $($Arguments -join ' ') failed with exit code $exitCode"
+      }
+      return $text
+    }
     $outboundTag = '{{ xp2p_client_network.outbound_tag }}'
     $endpointName = '{{ xp2p_client_network.endpoint_name }}'
-    $state = (& xp2p client state 2>&1) -join [Environment]::NewLine
+    $state = Invoke-Xp2pText -Arguments @('client', 'state')
     $state
     $endpointLine = $state -split "`r?`n" | Where-Object {
       $columns = $_ -split '\s+'
