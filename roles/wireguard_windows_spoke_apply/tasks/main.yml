@@ -6,6 +6,8 @@
         resolved_wireguard_network
         | combine({
             'hub': resolved_wireguard_network.hub_member,
+            'hub_public_key': resolved_wireguard_network.hub_public_key,
+            'hub_allowed_ips': resolved_wireguard_network.hub_allowed_ips,
             'spokes': (
               resolved_wireguard_network.active_peers
               | dict2items
