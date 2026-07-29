@@ -15,7 +15,15 @@
 - name: Select Windows WireGuard expected runtime contract
   ansible.builtin.set_fact:
     wireguard_windows_tunnel_name: "{{ resolved_wireguard_network.hub_member.windows_tunnel_name | default(resolved_wireguard_network.interface_name) }}"
-    wireguard_windows_expected_peers: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_peers }}"
+    wireguard_windows_expected_peers: >-
+      {%- set ns = namespace(peers=[]) -%}
+      {%- for peer in resolved_wireguard_network | ansible_common.core.wireguard_expected_peers -%}
+      {%- set ns.peers = ns.peers + [{
+        'public_key': peer.public_key,
+        'allowed_ips': peer.allowed_ips | default([])
+      }] -%}
+      {%- endfor -%}
+      {{ ns.peers }}
     wireguard_windows_expected_route_targets: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_route_targets }}"
     wireguard_windows_health_ping_addresses: "{{ resolved_wireguard_network | ansible_common.core.wireguard_expected_ping_targets }}"
     wireguard_windows_healthcheck_ping_source_address: >-

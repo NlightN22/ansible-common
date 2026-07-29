@@ -1,10 +1,3 @@
----
-- name: Confirm WireGuard apply operation
-  ansible.builtin.assert:
-    that:
-      - wireguard_apply_confirm | bool
-    fail_msg: "Set wireguard_apply_confirm=true to apply WireGuard configuration."
-
 - name: Select WireGuard member dispatch context
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_member_context
@@ -12,8 +5,6 @@
 - name: Run OpenWrt WireGuard apply
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_openwrt_apply
-  vars:
-    wireguard_openwrt_apply_confirm: "{{ wireguard_apply_confirm }}"
   when: wireguard_member_platform == 'openwrt'
 
 - name: Run OpenWrt WireGuard endpoint failover apply

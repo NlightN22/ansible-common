@@ -39,9 +39,14 @@
     path: "{{ wireguard_windows_staging_dir }}"
     state: directory
 
+- name: Render Windows WireGuard spoke config
+  ansible.builtin.set_fact:
+    wireguard_windows_spoke_config: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/windows-spoke.conf.j2') }}"
+  no_log: true
+
 - name: Stage Windows WireGuard spoke config
-  ansible.windows.win_template:
-    src: windows-spoke.conf.j2
+  ansible.windows.win_copy:
+    content: "{{ wireguard_windows_spoke_config }}"
     dest: "{{ wireguard_windows_staged_config }}"
   no_log: true
 
