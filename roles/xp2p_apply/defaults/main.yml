@@ -1,2 +1,9 @@
 ---
 xp2p_dispatch_unsupported_role_policy: fail
+xp2p_apply_healthcheck_enabled: true
+xp2p_server_certbot_deploy_hook_enabled: true
+xp2p_server_certbot_deploy_hook_path: /etc/letsencrypt/renewal-hooks/deploy/xp2p-server-cert-deploy.sh
+xp2p_server_certbot_live_dir: "/etc/letsencrypt/live/{{ resolved_xp2p_network.server_name | default(resolved_xp2p_network.endpoint_name) }}"
+xp2p_server_certbot_cert_path: "{{ xp2p_server_certbot_live_dir }}/fullchain.pem"
+xp2p_server_certbot_key_path: "{{ xp2p_server_certbot_live_dir }}/privkey.pem"
+xp2p_server_tls_cert_path: /etc/xp2p/tls/server/cert.pem

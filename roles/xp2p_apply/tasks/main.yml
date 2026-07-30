@@ -13,10 +13,56 @@
     - name: Run XP2P hub healthcheck before hub changes
       ansible.builtin.include_role:
         name: ansible_common.core.xp2p_hub_healthcheck
+      when: xp2p_apply_healthcheck_enabled | bool
 
-    - name: Report XP2P hub apply scope
-      ansible.builtin.debug:
-        msg: "Declarative XP2P hub mutations are not implemented yet; inventory-backed healthcheck completed."
+    - name: Ensure XP2P certbot deploy hook directory exists
+      ansible.builtin.file:
+        path: "{{ xp2p_server_certbot_deploy_hook_path | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: xp2p_server_certbot_deploy_hook_enabled | bool
+
+    - name: Install XP2P certbot deploy hook
+      ansible.builtin.template:
+        src: xp2p-server-cert-deploy.sh.j2
+        dest: "{{ xp2p_server_certbot_deploy_hook_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+      when: xp2p_server_certbot_deploy_hook_enabled | bool
+
+    - name: Check XP2P server certificate drift
+      ansible.builtin.shell: |
+        set -eu
+        live_cert='{{ xp2p_server_certbot_cert_path }}'
+        xp2p_cert='{{ xp2p_server_tls_cert_path }}'
+
+        live_fingerprint="$(openssl x509 -in "$live_cert" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+        current_fingerprint=""
+        if [ -f "$xp2p_cert" ]; then
+          current_fingerprint="$(openssl x509 -in "$xp2p_cert" -noout -fingerprint -sha256 | sed 's/^.*=//')"
+        fi
+
+        if [ "$live_fingerprint" = "$current_fingerprint" ]; then
+          echo current
+        else
+          echo drifted
+        fi
+      args:
+        executable: /bin/sh
+      register: xp2p_server_certificate_drift
+      changed_when: false
+      when: xp2p_server_certbot_deploy_hook_enabled | bool
+
+    - name: Deploy current certificate into XP2P when drifted
+      ansible.builtin.command: "{{ xp2p_server_certbot_deploy_hook_path }}"
+      register: xp2p_server_certificate_deploy
+      changed_when: "'deployed renewed XP2P certificate' in xp2p_server_certificate_deploy.stdout"
+      when:
+        - xp2p_server_certbot_deploy_hook_enabled | bool
+        - xp2p_server_certificate_drift.stdout == 'drifted'
   when: xp2p_member_role == 'hub'
 
 - name: Handle unsupported XP2P apply member

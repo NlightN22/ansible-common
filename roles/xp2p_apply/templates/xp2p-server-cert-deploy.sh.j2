@@ -1,0 +1,41 @@
+#!/bin/sh
+# Managed by Ansible. Deploy renewed Let's Encrypt certificates into XP2P.
+set -eu
+
+cert_path='{{ xp2p_server_certbot_cert_path }}'
+key_path='{{ xp2p_server_certbot_key_path }}'
+xp2p_cert_path='{{ xp2p_server_tls_cert_path }}'
+service_name='xp2p-server.service'
+
+log() {
+  logger -t xp2p-server-cert-deploy "$*"
+  printf '%s\n' "$*"
+}
+
+fingerprint() {
+  cert="$1"
+  [ -f "$cert" ] || return 1
+  openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//'
+}
+
+[ -f "$cert_path" ] || {
+  log "certificate file is missing: $cert_path"
+  exit 1
+}
+
+[ -f "$key_path" ] || {
+  log "private key file is missing: $key_path"
+  exit 1
+}
+
+live_fingerprint="$(fingerprint "$cert_path")"
+current_fingerprint="$(fingerprint "$xp2p_cert_path" || true)"
+
+if [ -n "$current_fingerprint" ] && [ "$live_fingerprint" = "$current_fingerprint" ]; then
+  log "XP2P certificate is already current"
+  exit 0
+fi
+
+xp2p server cert set --cert "$cert_path" --key "$key_path" --force --quiet
+systemctl restart "$service_name"
+log "deployed renewed XP2P certificate and restarted $service_name"
