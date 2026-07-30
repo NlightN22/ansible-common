@@ -44,6 +44,14 @@
       - openwrt_xp2p_three_x_ui_intercept_failover_restore_switch_delay_seconds | int >= openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds | int
       - openwrt_xp2p_three_x_ui_intercept_failover_script_path | length > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_service_path | length > 0
+      - >-
+        not (openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool)
+        or (
+          openwrt_xp2p_three_x_ui_intercept_failover_socks_probes | length > 0
+          and openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int > 0
+          and openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int
+            <= openwrt_xp2p_three_x_ui_intercept_failover_socks_probes | length
+        )
     fail_msg: "3x-ui OpenWrt LAN intercept failover model is incomplete for {{ inventory_hostname }}."
   when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
 

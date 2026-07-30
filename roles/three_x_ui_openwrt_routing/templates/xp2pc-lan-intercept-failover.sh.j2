@@ -14,6 +14,7 @@ disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disab
 restore_intercept_when_alive='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive | bool | lower }}'
 use_socks_smoke='{{ openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool | lower }}'
 socks_port='{{ openwrt_xp2p_three_x_ui_intercept_failover_socks_port | int }}'
+required_probe_successes='{{ openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int }}'
 
 log() {
   logger -t "$log_tag" "$*"
@@ -33,8 +34,18 @@ route_table_has_default() {
 
 socks_smoke_alive() {
   [ "$use_socks_smoke" = "true" ] || return 0
-  curl --socks5-hostname "127.0.0.1:${socks_port}" \
-    -fsS --connect-timeout 3 --max-time 5 2ip.me >/dev/null 2>&1
+  probe_successes=0
+{% for probe in openwrt_xp2p_three_x_ui_intercept_failover_socks_probes %}
+  probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" \
+    -fsS --connect-timeout 3 --max-time 5 '{{ probe.url }}' 2>/dev/null || true)"
+  probe_output="$(printf '%s' "$probe_output" | tr -d '\r\n')"
+{% if probe.expected_public_ip is defined %}
+  [ "$probe_output" = '{{ probe.expected_public_ip }}' ] && probe_successes=$((probe_successes + 1))
+{% else %}
+  [ -n "$probe_output" ] && probe_successes=$((probe_successes + 1))
+{% endif %}
+{% endfor %}
+  [ "$probe_successes" -ge "$required_probe_successes" ]
 }
 
 transport_status() {
