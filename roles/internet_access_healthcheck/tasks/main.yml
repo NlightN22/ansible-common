@@ -264,3 +264,13 @@
     fail_msg: >-
       Required internet access failures:
       {{ internet_access_healthcheck_failures | join('; ') }}
+  when: internet_access_healthcheck_fail_on_error | bool
+
+- name: Report required internet access healthcheck failures without stopping the host
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      failures: "{{ internet_access_healthcheck_failures }}"
+  when:
+    - not (internet_access_healthcheck_fail_on_error | bool)
+    - internet_access_healthcheck_failures | length > 0
