@@ -1,9 +1,9 @@
 ---
-- name: Run reusable RDP Gateway integration tests
+- name: Run reusable RDP Gateway access healthcheck
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Apply reusable RDP Gateway integration test role
+    - name: Apply reusable RDP Gateway access healthcheck role
       ansible.builtin.include_role:
         name: ansible_common.core.rdp_gateway_integration_test
       when: rdp_gateway_integration_test_enabled | bool

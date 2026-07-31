@@ -34,7 +34,7 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `playbooks/wireguard_openwrt_apply.yml`: reusable WireGuard OpenWrt apply playbook.
 - `playbooks/wireguard_openwrt_discovery.yml`: reusable WireGuard OpenWrt discovery playbook.
 - `playbooks/wireguard_openwrt_healthcheck.yml`: reusable WireGuard OpenWrt healthcheck playbook.
-- `playbooks/rdp_gateway_integration_test.yml`: reusable RD Gateway integration test playbook.
+- `playbooks/rdp_gateway_access_healthcheck.yml`: reusable RD Gateway access healthcheck playbook.
 
 ## Consumer Project Usage
 
