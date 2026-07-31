@@ -40,6 +40,67 @@
       - three_x_ui_hub_missing_commands | length == 0
     fail_msg: "Missing required commands on {{ inventory_hostname }}: {{ three_x_ui_hub_missing_commands | join(', ') }}"
 
+- name: Check 3x-ui Certbot deploy hook
+  ansible.builtin.stat:
+    path: "{{ three_x_ui_hub_certbot_hook_path }}"
+  register: three_x_ui_hub_certbot_hook
+  changed_when: false
+
+- name: Validate 3x-ui Certbot deploy hook
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_certbot_hook.stat.exists
+      - three_x_ui_hub_certbot_hook.stat.isreg
+      - three_x_ui_hub_certbot_hook.stat.executable
+    fail_msg: "The 3x-ui Certbot deploy hook is missing or not executable on {{ inventory_hostname }}."
+
+- name: Read 3x-ui Certbot deploy hook
+  ansible.builtin.slurp:
+    path: "{{ three_x_ui_hub_certbot_hook_path }}"
+  register: three_x_ui_hub_certbot_hook_content
+  changed_when: false
+
+- name: Validate 3x-ui Certbot deploy hook content
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_certbot_hook_content.content | b64decode is search('--force-recreate 3x-ui xp2pdiag')
+      - three_x_ui_hub_certbot_hook_content.content | b64decode is search(three_x_ui_hub_project_dir)
+    fail_msg: "The 3x-ui Certbot deploy hook does not recreate the managed containers on {{ inventory_hostname }}."
+
+- name: Read local 3x-ui certificate fingerprint
+  ansible.builtin.command: >-
+    openssl x509 -in {{ (three_x_ui_hub_certbot_live_dir ~ '/fullchain.pem') | quote }}
+    -noout -fingerprint -sha256
+  register: three_x_ui_hub_local_certificate
+  changed_when: false
+
+- name: Read certificate served by Xray
+  ansible.builtin.shell: |
+    set -o pipefail
+    timeout 15 openssl s_client \
+      -connect 127.0.0.1:{{ three_x_ui_hub_tls_probe_port }} \
+      -servername {{ three_x_ui_hub_domain | quote }} \
+    </dev/null 2>/dev/null |
+    openssl x509 -noout -fingerprint -sha256 -checkend 0
+  args:
+    executable: /bin/bash
+  register: three_x_ui_hub_served_certificate
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 5
+  until: three_x_ui_hub_served_certificate.rc == 0
+
+- name: Validate 3x-ui served certificate
+  ansible.builtin.assert:
+    that:
+      - three_x_ui_hub_served_certificate.rc == 0
+      - three_x_ui_hub_served_certificate.stdout_lines[0] == three_x_ui_hub_local_certificate.stdout
+    fail_msg: >-
+      3x-ui served certificate is expired or differs from the current Certbot certificate
+      on {{ inventory_hostname }}. Local={{ three_x_ui_hub_local_certificate.stdout | default('unavailable') }},
+      served={{ three_x_ui_hub_served_certificate.stdout | default('unavailable') }}.
+
 - name: Check Docker daemon
   ansible.builtin.command: docker info --format {% raw %}'{{ .ServerVersion }}'{% endraw %}
   register: three_x_ui_hub_docker_info

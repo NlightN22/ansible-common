@@ -1,6 +1,9 @@
 ---
 three_x_ui_hub_project_dir: /opt/3x-ui-docker
 three_x_ui_hub_domain: "{{ inventory_hostname }}"
+three_x_ui_hub_certbot_hook_path: /etc/letsencrypt/renewal-hooks/deploy/three-x-ui-hub-cert-deploy.sh
+three_x_ui_hub_certbot_live_dir: "/etc/letsencrypt/live/{{ three_x_ui_hub_domain }}"
+three_x_ui_hub_tls_probe_port: 443
 three_x_ui_hub_image: ghcr.io/mhsanaei/3x-ui:2.8.11
 three_x_ui_hub_xp2pdiag_image: oncharterliz/xp2pdiag:latest
 three_x_ui_hub_re_filter_dat_enabled: true
@@ -34,6 +37,7 @@ three_x_ui_hub_required_commands:
   - iperf3
   - docker
   - ss
+  - openssl
 three_x_ui_hub_container_name_patterns:
   - 3x-ui
   - x-ui
