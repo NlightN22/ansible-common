@@ -1,0 +1,12 @@
+---
+rdp_gateway_integration_test_enabled: true
+rdp_gateway_integration_gateway: ""
+rdp_gateway_integration_binary: xfreerdp
+rdp_gateway_integration_runner: xvfb-run
+rdp_gateway_integration_runner_args:
+  - -a
+  - --server-args=-screen 0 1x1x24
+rdp_gateway_integration_timeout_ms: 15000
+rdp_gateway_integration_auth_only_option: "+auth-only"
+rdp_gateway_integration_credentials_option: "/from-stdin:force"
+rdp_gateway_integration_tests: []

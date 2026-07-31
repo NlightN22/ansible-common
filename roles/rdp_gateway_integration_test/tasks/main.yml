@@ -1,0 +1,92 @@
+---
+- name: Validate RDP Gateway integration test definition
+  ansible.builtin.assert:
+    that:
+      - rdp_gateway_integration_gateway | length > 0
+      - rdp_gateway_integration_tests | length > 0
+      - rdp_gateway_integration_tests | map(attribute='name') | list | length == rdp_gateway_integration_tests | length
+      - rdp_gateway_integration_tests | map(attribute='target') | list | length == rdp_gateway_integration_tests | length
+      - rdp_gateway_integration_tests | map(attribute='username') | list | length == rdp_gateway_integration_tests | length
+      - rdp_gateway_integration_tests | map(attribute='password') | list | length == rdp_gateway_integration_tests | length
+      - rdp_gateway_integration_tests | map(attribute='expected_success') | list | length == rdp_gateway_integration_tests | length
+    fail_msg: >-
+      RDP Gateway integration tests require a gateway and complete test cases
+      with target, username, password, and expected_success values.
+
+- name: Check FreeRDP client availability
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - command -v {{ rdp_gateway_integration_binary | quote }}
+  register: rdp_gateway_integration_binary_check
+  changed_when: false
+  failed_when: false
+
+- name: Check headless display runner availability
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - command -v {{ rdp_gateway_integration_runner | quote }}
+  register: rdp_gateway_integration_runner_check
+  changed_when: false
+  failed_when: false
+
+- name: Require FreeRDP client and headless display runner
+  ansible.builtin.assert:
+    that:
+      - rdp_gateway_integration_binary_check.rc == 0
+      - rdp_gateway_integration_runner_check.rc == 0
+    fail_msg: >-
+      FreeRDP client '{{ rdp_gateway_integration_binary }}' is required on the
+      integration-test runner together with '{{ rdp_gateway_integration_runner }}'.
+      Install the platform packages before running the RDP Gateway tests.
+
+- name: Run RDP Gateway authentication test
+  ansible.builtin.command:
+    argv: >-
+      {{ [rdp_gateway_integration_runner] + rdp_gateway_integration_runner_args +
+         [rdp_gateway_integration_binary,
+          '/v:' ~ item.target,
+          '/g:' ~ rdp_gateway_integration_gateway,
+          '/u:' ~ item.username,
+          '/d:' ~ (item.domain | default('')),
+          rdp_gateway_integration_credentials_option,
+          rdp_gateway_integration_auth_only_option,
+          '/cert:ignore',
+          '/timeout:' ~ (rdp_gateway_integration_timeout_ms | string),
+          '/log-level:ERROR'] }}
+    stdin: "{{ item.password }}"
+    stdin_add_newline: true
+  loop: "{{ rdp_gateway_integration_tests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: rdp_gateway_integration_results
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Validate RDP Gateway authentication results
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.rc == 0) == (item.item.expected_success | bool)
+      - >-
+        item.item.expected_success | bool or
+        (item.stdout ~ item.stderr) is search(
+          item.item.failure_pattern | default('(?i)(ERRCONNECT_|authentication|access denied|logon failure)')
+        )
+    fail_msg: >-
+      RDP Gateway integration test '{{ item.item.name }}' did not produce the
+      expected authentication result. The test is intentionally not retried.
+  loop: "{{ rdp_gateway_integration_results.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  no_log: true
+
+- name: Report RDP Gateway integration test summary
+  ansible.builtin.debug:
+    msg:
+      - "RDP Gateway integration tests completed: {{ rdp_gateway_integration_results.results | length }}"
+      - "Credentials and FreeRDP output are intentionally suppressed."

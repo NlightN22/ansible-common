@@ -19,6 +19,7 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `roles/wireguard_openwrt_apply`: WireGuard OpenWrt package install, UCI apply, restart, and verification.
 - `roles/wireguard_openwrt_discovery`: read-only WireGuard OpenWrt runtime and routing discovery.
 - `roles/wireguard_openwrt_healthcheck`: read-only WireGuard OpenWrt runtime, route, UCI, and firewall checks.
+- `roles/rdp_gateway_integration_test`: reusable FreeRDP authentication tests through an RD Gateway.
 - `plugins/filter/model.py`: filters for model loading, validation, normalization, and access helpers.
 - `docs/model_contract.md`: version 1 architecture model contract.
 - `docs/consumer_projects.md`: wrapper playbook and project boundary guidance.
@@ -33,6 +34,7 @@ This collection is intended to hold logic that can be reused by multiple Ansible
 - `playbooks/wireguard_openwrt_apply.yml`: reusable WireGuard OpenWrt apply playbook.
 - `playbooks/wireguard_openwrt_discovery.yml`: reusable WireGuard OpenWrt discovery playbook.
 - `playbooks/wireguard_openwrt_healthcheck.yml`: reusable WireGuard OpenWrt healthcheck playbook.
+- `playbooks/rdp_gateway_integration_test.yml`: reusable RD Gateway integration test playbook.
 
 ## Consumer Project Usage
 
