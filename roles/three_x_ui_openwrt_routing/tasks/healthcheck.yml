@@ -42,6 +42,8 @@
       test -s "$file"
     done
     test -s "$routing_file"
+    command -v jq >/dev/null
+    jq empty "$routing_file"
     grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' "$routing_file" >/dev/null
     {% set routing_ns = namespace(domains=[], ipv4_cidrs=[]) %}
     {% for route in openwrt_xp2p_three_x_ui_proxy_routes %}
@@ -69,6 +71,19 @@
       echo "ROUTING_DIRECT_CIDR_MISSING cidr={{ cidr }} outbound=${direct_outbound_tag}"
       exit 1
     fi
+    {% endfor %}
+    {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
+    jq -e --arg direct_tag "$direct_outbound_tag" \
+      --arg proxy_tag '{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}' \
+      --arg direct_cidr '{{ cidr }}' \
+      '(.rules | type == "array") and
+       (([.[] | to_entries[] |
+          select(.value.outboundTag == $direct_tag and
+                 ((.value.ip // []) | index($direct_cidr))) |
+          .key] | min) <
+        ([.[] | to_entries[] |
+          select(.value.outboundTag == $proxy_tag) |
+          .key] | min))' "$routing_file" >/dev/null
     {% endfor %}
     if [ '{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs | length }}' -gt 0 ] &&
        ! grep -F -- '"outboundTag": "'"$direct_outbound_tag"'"' "$routing_file" >/dev/null 2>&1; then
@@ -197,6 +212,13 @@
     {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
     if uci -q get "firewall.${private_set_name}.entry" | tr ' ' '\n' | grep -Fx '{{ cidr }}' >/dev/null 2>&1; then
       echo "LAN_INTERCEPT_DIRECT_CIDR_STILL_LOCAL cidr={{ cidr }}"
+      exit 1
+    fi
+    {% endfor %}
+    live_private_entries="$(nft list set inet fw4 "$private_set_name" 2>/dev/null || true)"
+    {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
+    if printf '%s\n' "$live_private_entries" | grep -Eq '(^|[^0-9.]){{ cidr.split("/")[0] }}([^0-9.]|$)'; then
+      echo "LAN_INTERCEPT_LIVE_DIRECT_CIDR_STILL_LOCAL cidr={{ cidr }}"
       exit 1
     fi
     {% endfor %}

@@ -256,6 +256,14 @@
   register: openwrt_xp2p_three_x_ui_intercept_mark_rules
   changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_mark_rules.stdout"
 
+- name: Synchronize live 3x-ui OpenWrt LAN intercept private set
+  ansible.builtin.raw: |
+    set -eu
+    private_set_name='{{ (openwrt_xp2p_three_x_ui_routing.intercept.firewall_rule_section | default("xp2pc_lan_intercept_mark")) }}_private'
+    nft flush set inet fw4 "$private_set_name"
+    nft add element inet fw4 "$private_set_name" { {% for cidr in ((openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) + (openwrt_xp2p_three_x_ui_routing.intercept.local_destination_exclusions | default([]))) %}{{ cidr }}{% if not loop.last %}, {% endif %}{% endfor %} }
+  changed_when: true
+
 - name: Apply 3x-ui OpenWrt LAN intercept policy route
   ansible.builtin.raw: |
     set -eu

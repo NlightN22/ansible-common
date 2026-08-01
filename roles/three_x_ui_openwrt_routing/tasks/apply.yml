@@ -82,6 +82,38 @@
   delegate_to: localhost
   run_once: true
 
+- name: Validate rendered 3x-ui OpenWrt Xray routing JSON and rule order
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - direct_tag
+      - "{{ openwrt_xp2p_three_x_ui_routing.xray_direct_outbound_tag | default('direct') }}"
+      - --arg
+      - proxy_tag
+      - "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
+      - --arg
+      - direct_cidr
+      - "{{ item }}"
+      - >-
+        .rules as $rules |
+        ([ $rules | to_entries[] |
+          select(.value.outboundTag == $direct_tag and
+                 ((.value.ip // []) | index($direct_cidr))) |
+          .key ] | min) as $direct_index |
+        ([ $rules | to_entries[] |
+          select(.value.outboundTag == $proxy_tag) |
+          .key ] | min) as $proxy_index |
+        ($rules | type == "array") and ($direct_index < $proxy_index)
+      - "{{ openwrt_xp2p_three_x_ui_routing_cache_dir }}/{{ openwrt_xp2p_three_x_ui_routing_star.id }}/routing.rules.after-xp2p-managed.json"
+  loop: "{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+
 - name: Check xp2p command on OpenWrt before routing apply
   ansible.builtin.raw: command -v xp2p
   register: openwrt_xp2p_three_x_ui_routing_xp2p_command
