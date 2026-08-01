@@ -29,6 +29,10 @@
     openwrt_xp2p_three_x_ui_intercept_failover_table: "{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default('100') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_rule_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default('xp2pc_lan_intercept') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_routing_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
+    openwrt_xp2p_three_x_ui_intercept_failover_state_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state"
+    openwrt_xp2p_three_x_ui_intercept_failover_backup_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json.failover-base"
+    openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates: "{{ openwrt_xp2p_three_x_ui_transport_candidates }}"
 
 - name: Validate 3x-ui OpenWrt LAN intercept failover model
   ansible.builtin.assert:
@@ -44,6 +48,8 @@
       - openwrt_xp2p_three_x_ui_intercept_failover_restore_switch_delay_seconds | int >= openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds | int
       - openwrt_xp2p_three_x_ui_intercept_failover_script_path | length > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_service_path | length > 0
+      - openwrt_xp2p_three_x_ui_intercept_failover_routing_file | length > 0
+      - openwrt_xp2p_three_x_ui_intercept_failover_state_file | length > 0
       - >-
         not (openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool)
         or (

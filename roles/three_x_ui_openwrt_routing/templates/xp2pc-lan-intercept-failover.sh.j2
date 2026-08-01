@@ -5,16 +5,17 @@ set -u
 instance_name='{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}'
 log_tag="$instance_name"
 transport_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_interface }}'
-transport_tag='{{ openwrt_xp2p_three_x_ui_intercept_failover_proxy_outbound_tag }}'
 route_table='{{ openwrt_xp2p_three_x_ui_intercept_failover_table }}'
 rule_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_rule_section }}'
+routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
+state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
+backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
 switch_delay_seconds='{{ openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds | int }}'
 restore_switch_delay_seconds='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_switch_delay_seconds | int }}'
 disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disable_intercept_when_dead | bool | lower }}'
 restore_intercept_when_alive='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive | bool | lower }}'
 use_socks_smoke='{{ openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool | lower }}'
 socks_port='{{ openwrt_xp2p_three_x_ui_intercept_failover_socks_port | int }}'
-required_probe_successes='{{ openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int }}'
 
 log() {
   logger -t "$log_tag" "$*"
@@ -27,126 +28,149 @@ intercept_disabled() {
 }
 
 route_table_has_default() {
-  ip route show table "$route_table" 2>/dev/null |
-    grep -E '^default([[:space:]]|$)' |
+  ip route show table "$route_table" 2>/dev/null | grep -E '^default([[:space:]]|$)' |
     grep -F " dev ${transport_interface}" >/dev/null
 }
 
-socks_smoke_alive() {
-  [ "$use_socks_smoke" = "true" ] || return 0
-  probe_successes=0
-{% for probe in openwrt_xp2p_three_x_ui_intercept_failover_socks_probes %}
-  probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" \
-    -fsS --connect-timeout 3 --max-time 5 '{{ probe.url }}' 2>/dev/null || true)"
-  probe_output="$(printf '%s' "$probe_output" | tr -d '\r\n')"
-{% if probe.expected_public_ip is defined %}
-  [ "$probe_output" = '{{ probe.expected_public_ip }}' ] && probe_successes=$((probe_successes + 1))
-{% else %}
-  [ -n "$probe_output" ] && probe_successes=$((probe_successes + 1))
-{% endif %}
-{% endfor %}
-  [ "$probe_successes" -ge "$required_probe_successes" ]
-}
-
 transport_status() {
+  candidate_tag="$1"
   status=''
+  state_json="$(xp2p client state --json 2>/dev/null || true)"
   if command -v jsonfilter >/dev/null 2>&1; then
-    state_json="$(xp2p client state --json 2>/dev/null || true)"
-    status="$(printf '%s\n' "$state_json" | jsonfilter -e "@.result.tunnels[@.tag='${transport_tag}'].status" 2>/dev/null | head -n 1)"
+    status="$(printf '%s\n' "$state_json" | jsonfilter -e "@.result.tunnels[@.tag='${candidate_tag}'].status" 2>/dev/null | head -n 1)"
   fi
   if [ -z "$status" ]; then
     state="$(xp2p client state 2>/dev/null || true)"
-    status="$(printf '%s\n' "$state" | awk -v tag="$transport_tag" '$1 == tag { print $3; exit }')"
+    status="$(printf '%s\n' "$state" | awk -v tag="$candidate_tag" '$1 == tag { print $3; exit }')"
   fi
   [ -n "$status" ] || status=missing
   printf '%s\n' "$status"
 }
 
-transport_alive() {
-  ip link show "$transport_interface" >/dev/null 2>&1 || return 1
-  route_table_has_default || return 1
-  socks_smoke_alive || return 1
-
-  status="$(transport_status)"
-  [ "$status" = healthy ] || [ "$status" = alive ]
+transport_enabled() {
+  candidate_tag="$1"
+  state="$(xp2p client list 2>/dev/null | awk -v tag="$candidate_tag" '$2 == tag { print $NF; exit }')"
+  [ "$state" = enabled ]
 }
 
-transport_dead() {
-  ip link show "$transport_interface" >/dev/null 2>&1 || return 0
-  route_table_has_default || return 0
-  socks_smoke_alive || return 0
+socks_probe() {
+  expected_ip="$1"
+  [ "$use_socks_smoke" = "true" ] || return 0
+  probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" -fsS --connect-timeout 3 --max-time 8 \
+    'https://api.myip.la' 2>/dev/null | tr -d '\r\n' || true)"
+  [ "$probe_output" = "$expected_ip" ]
+}
 
-  status="$(transport_status)"
-  if [ "$status" = unhealthy ] || [ "$status" = not-detected ] ||
-     [ "$status" = disabled ] || [ "$status" = dead ] || [ "$status" = missing ]; then
-    return 0
+candidate_healthy() {
+  candidate_type="$1"
+  candidate_tag="$2"
+  expected_ip="$3"
+  if [ "$candidate_type" = wan_direct ]; then
+    curl -fsS --connect-timeout 3 --max-time 8 https://api.myip.la >/dev/null 2>&1
+    return $?
   fi
+  [ "$candidate_type" = xp2p_xray ] || return 1
+  [ "$candidate_tag" != "" ] || return 1
+  transport_enabled "$candidate_tag" || return 1
+  [ "$(transport_status "$candidate_tag")" = healthy ] ||
+    [ "$(transport_status "$candidate_tag")" = alive ] || return 1
+  return 0
+}
 
-  return 1
+active_transport() {
+  if [ -f "$state_file" ]; then
+    sed -n 's/^active_transport=//p' "$state_file" | head -n 1
+  fi
+}
+
+switch_routing_outbound() {
+  desired_tag="$1"
+  expected_ip="$2"
+  current_tag="$(active_transport)"
+  [ "$current_tag" = "$desired_tag" ] && return 0
+  [ -f "$routing_file" ] || return 1
+  [ -f "$backup_file" ] || cp -p "$routing_file" "$backup_file"
+  tmp_file="${routing_file}.failover.$$"
+  cp -p "$routing_file" "$tmp_file"
+{% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates if candidate.type == 'xp2p_xray' %}
+  sed -i "s/\"outboundTag\": \"{{ candidate.outbound_tag }}\"/\"outboundTag\": \"${desired_tag}\"/g" "$tmp_file"
+{% endfor %}
+  if command -v jq >/dev/null 2>&1; then jq -e . "$tmp_file" >/dev/null 2>&1 || { rm -f "$tmp_file"; return 1; }
+  fi
+  rollback_file="${routing_file}.failover-rollback.$$"
+  cp -p "$routing_file" "$rollback_file"
+  mv "$tmp_file" "$routing_file"
+  xp2p client service restart >/dev/null 2>&1 || { mv "$rollback_file" "$routing_file"; return 1; }
+  sleep 15
+  if ! socks_probe "$expected_ip"; then
+    mv "$rollback_file" "$routing_file"
+    xp2p client service restart >/dev/null 2>&1 || true
+    sleep 15
+    return 1
+  fi
+  rm -f "$rollback_file"
+  printf 'active_transport=%s\n' "$desired_tag" > "$state_file"
+  log "switched managed Xray outbound to ${desired_tag}"
 }
 
 disable_intercept_rule() {
-  if intercept_disabled; then
-    log "LAN intercept rule ${rule_section} is already disabled"
-    return 0
-  fi
-
+  intercept_disabled && return 0
   uci set "network.${rule_section}.disabled=1"
   uci commit network
   /etc/init.d/network reload
-  log "disabled LAN intercept policy rule ${rule_section}; marked LAN traffic should use the main table"
+  log "disabled LAN intercept rule ${rule_section}; WAN direct fallback is active"
 }
 
 enable_intercept_rule() {
-  if ! intercept_disabled; then
-    log "LAN intercept rule ${rule_section} is already enabled"
-    return 0
-  fi
-
+  ! intercept_disabled && return 0
   uci -q delete "network.${rule_section}.disabled" || true
   uci commit network
   /etc/init.d/network reload
-  log "enabled LAN intercept policy rule ${rule_section}; marked LAN traffic should use table ${route_table}"
+  log "enabled LAN intercept rule ${rule_section}; table ${route_table} is active"
 }
 
-if transport_alive; then
-  if [ "$restore_intercept_when_alive" != "true" ]; then
-    log "transport ${transport_tag} is alive; intercept restore is disabled by model"
-    exit 0
+select_transport() {
+{% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates %}
+  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default('') }}' '{{ candidate.expected_public_ip | default('') }}'; then
+    printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default('') }}'
+    return 0
   fi
+{% endfor %}
+  return 1
+}
 
-  if intercept_disabled; then
-    log "transport ${transport_tag} is alive; waiting ${restore_switch_delay_seconds}s before LAN intercept restore"
-    sleep "$restore_switch_delay_seconds"
-    if transport_alive; then
-      enable_intercept_rule
-    else
-      log "transport ${transport_tag} changed state during restore delay; leaving LAN intercept unchanged"
-    fi
-  else
-    log "transport ${transport_tag} is alive and LAN intercept rule ${rule_section} is enabled"
-  fi
+if ! route_table_has_default; then
+  disable_intercept_rule
   exit 0
 fi
 
-if transport_dead; then
-  if [ "$disable_intercept_when_dead" != "true" ]; then
-    log "transport ${transport_tag} is dead; intercept disable is disabled by model"
-    exit 0
-  fi
-
-  if ! intercept_disabled; then
-    log "transport ${transport_tag} is dead; waiting ${switch_delay_seconds}s before LAN intercept disable"
-    sleep "$switch_delay_seconds"
-    if transport_dead; then
-      disable_intercept_rule
-    else
-      log "transport ${transport_tag} recovered during disable delay; leaving LAN intercept unchanged"
-    fi
-  else
-    log "transport ${transport_tag} is dead and LAN intercept rule ${rule_section} is disabled"
-  fi
+selection="$(select_transport || true)"
+if [ -z "$selection" ]; then
+  [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
+  log "no healthy transport candidate; leaving managed outbound unchanged"
   exit 0
 fi
 
-log "transport ${transport_tag} state is inconclusive; leaving LAN intercept rule ${rule_section} unchanged"
+selected_id="${selection%%|*}"
+selected_rest="${selection#*|}"
+selected_type="${selected_rest%%|*}"
+selected_tag="${selected_rest#*|}"
+current_transport="$(active_transport)"
+
+if [ "$selected_type" = xp2p_xray ]; then
+  if [ "$current_transport" != "$selected_tag" ]; then
+    [ -n "$current_transport" ] && [ "$selected_id" = xp2p_dcpkt2 ] && sleep "$restore_switch_delay_seconds"
+    selected_expected_ip=""
+{% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates if candidate.type == 'xp2p_xray' %}
+    [ "$selected_id" = '{{ candidate.id }}' ] && selected_expected_ip='{{ candidate.expected_public_ip }}'
+{% endfor %}
+    switch_routing_outbound "$selected_tag" "$selected_expected_ip" || {
+      log "failed to switch managed Xray outbound to ${selected_tag}; intercept remains unchanged"
+      exit 1
+    }
+  fi
+  [ "$restore_intercept_when_alive" = true ] && enable_intercept_rule
+else
+  [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
+fi
+log "selected transport ${selected_id}"

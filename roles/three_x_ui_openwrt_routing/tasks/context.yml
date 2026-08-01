@@ -37,6 +37,8 @@
       {{ openwrt_xp2p_three_x_ui_routing.intercept.failover.socks_probes | default([]) }}
     openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes: >-
       {{ openwrt_xp2p_three_x_ui_routing.intercept.failover.required_probe_successes | default(0) }}
+    openwrt_xp2p_three_x_ui_transport_candidates: >-
+      {{ openwrt_xp2p_three_x_ui_routing.transport_candidates | default([]) }}
 
 - name: Build 3x-ui OpenWrt required access proxy route list
   ansible.builtin.set_fact:
@@ -99,6 +101,10 @@
       - openwrt_xp2p_three_x_ui_routing.dat_files | default([]) | length > 0
       - openwrt_xp2p_three_x_ui_routing.socks_port | default(0) | int > 0
       - openwrt_xp2p_three_x_ui_routing.socks_egress_checks | default([]) | length > 0
+      - openwrt_xp2p_three_x_ui_transport_candidates | length >= 2
+      - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='id') | list | last == 'wan_direct'
+      - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='outbound_tag', default='') | list | select('equalto', '') | list | length == 1
+      - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='expected_public_ip', default='') | list | select('equalto', '') | list | length == 1
       - >-
         openwrt_xp2p_three_x_ui_routing.mandatory_proxy_routes is not defined
       - >-
