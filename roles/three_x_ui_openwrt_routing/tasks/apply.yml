@@ -75,7 +75,7 @@
       - >-
         '"' ~ item ~ '"'
         in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
-  fail_msg: "Xray direct route CIDR {{ item }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
+    fail_msg: "Xray direct route CIDR {{ item }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
   loop: "{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs }}"
   loop_control:
     label: "{{ item }}"
