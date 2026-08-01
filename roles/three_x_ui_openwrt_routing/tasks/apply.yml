@@ -228,7 +228,14 @@
       ansible.builtin.include_tasks: intercept_apply.yml
 
     - name: Install 3x-ui OpenWrt LAN intercept failover after intercept apply
-      ansible.builtin.include_tasks: intercept_failover.yml
+      block:
+        - name: Prepare generic OpenWrt transport failover context
+          ansible.builtin.include_tasks: context.yml
+
+        - name: Install generic OpenWrt transport failover
+          ansible.builtin.include_role:
+            name: ansible_common.core.openwrt_transport_failover
+            tasks_from: main
 
     - name: Apply 3x-ui OpenWrt LAN intercept manual mode after failover install
       ansible.builtin.include_tasks: intercept_manual.yml

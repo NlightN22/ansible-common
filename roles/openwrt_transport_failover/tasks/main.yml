@@ -1,7 +1,4 @@
 ---
-- name: Prepare 3x-ui OpenWrt routing context for LAN intercept failover
-  ansible.builtin.include_tasks: context.yml
-
 - name: Build 3x-ui OpenWrt LAN intercept failover settings
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_intercept_failover: "{{ openwrt_xp2p_three_x_ui_routing.intercept.failover | default({}) }}"
@@ -61,8 +58,8 @@
 
 - name: Build 3x-ui OpenWrt LAN intercept failover script and procd service
   ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_intercept_failover_script_content: "{{ lookup('ansible.builtin.template', 'xp2pc-lan-intercept-failover.sh.j2') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_service_content: "{{ lookup('ansible.builtin.template', 'xp2pc-lan-intercept-failover.init.j2') }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_script_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.sh.j2') }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_service_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.init.j2') }}"
   when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
 
 - name: Remove legacy 3x-ui-named OpenWrt transport failover artifacts
