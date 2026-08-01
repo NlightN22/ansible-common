@@ -13,7 +13,7 @@
   ansible.builtin.raw: |
     set -eu
     mode='{{ three_x_ui_intercept_manual_mode }}'
-    service_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.service_path | default("/etc/init.d/xp2pc-lan-intercept-failover") }}'
+    service_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.service_path | default("/etc/init.d/openwrt-transport-failover") }}'
     rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section }}'
     route_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section }}'
     table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table }}'

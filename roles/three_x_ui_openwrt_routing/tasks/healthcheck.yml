@@ -357,9 +357,9 @@
 - name: Check 3x-ui OpenWrt LAN intercept failover state
   ansible.builtin.raw: |
     set -eu
-    script_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.script_path | default("/usr/local/sbin/xp2pc-lan-intercept-failover") }}'
-    service_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.service_path | default("/etc/init.d/xp2pc-lan-intercept-failover") }}'
-    instance_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.instance_name | default("xp2pc-lan-intercept-failover") }}'
+    script_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.script_path | default("/usr/local/sbin/openwrt-transport-failover") }}'
+    service_path='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.service_path | default("/etc/init.d/openwrt-transport-failover") }}'
+    instance_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.failover.instance_name | default("openwrt-transport-failover") }}'
     rule_name='{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default("xp2pc_lan_intercept") }}'
     xp2pc_if='{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default("xp2pc") }}'
     table='{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default("100") }}'
