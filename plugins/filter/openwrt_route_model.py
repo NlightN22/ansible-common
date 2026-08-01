@@ -113,6 +113,8 @@ def _add_wireguard_state(state: dict[str, list[dict[str, Any]]], site: dict[str,
             endpoint_route["metric"] = route["metric"]
         if transport.get("interface_role"):
             endpoint_route["interface_role"] = transport["interface_role"]
+        elif member.get("platform", "openwrt") == "openwrt" and transport.get("type") == "public":
+            endpoint_route["interface_role"] = "wan"
         else:
             endpoint_route["interface"] = transport["interface"]
         state["excluded_routes"].append(endpoint_route)
