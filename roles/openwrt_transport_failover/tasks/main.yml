@@ -4,6 +4,24 @@
     openwrt_xp2p_three_x_ui_intercept_failover: "{{ openwrt_xp2p_three_x_ui_routing.intercept.failover | default({}) }}"
     openwrt_xp2p_three_x_ui_intercept_enabled: "{{ openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) }}"
 
+- name: Load the selected OpenWrt router transport binding
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/openwrt/{{ inventory_hostname }}.yml"
+    name: openwrt_transport_failover_router_document
+
+- name: Resolve the active WAN interface for runtime direct probes
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_intercept_failover_wan_interface: >-
+      {{
+        (
+          openwrt_transport_failover_router_document.openwrt_router.uplinks
+          | selectattr('active', 'equalto', true)
+          | sort(attribute='priority')
+          | map(attribute='interface')
+          | first
+        ) | default('')
+      }}
+
 - name: Build 3x-ui OpenWrt LAN intercept failover effective settings
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_intercept_failover_enabled: "{{ openwrt_xp2p_three_x_ui_intercept_enabled | bool and openwrt_xp2p_three_x_ui_intercept_failover.enabled | default(false) | bool }}"
@@ -23,6 +41,8 @@
     openwrt_xp2p_three_x_ui_intercept_failover_interface: "{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default('xp2pc') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_table: "{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default('100') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_rule_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default('xp2pc_lan_intercept') }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_route_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default('xp2pc_lan_intercept_default') }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_wan_interface: "{{ openwrt_xp2p_three_x_ui_intercept_failover_wan_interface }}"
     openwrt_xp2p_three_x_ui_intercept_failover_socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
     openwrt_xp2p_three_x_ui_intercept_failover_routing_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
     openwrt_xp2p_three_x_ui_intercept_failover_state_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state"
@@ -60,6 +80,14 @@
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_intercept_failover_script_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.sh.j2') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_service_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.init.j2') }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_script_chunks: >-
+      {{
+        lookup('ansible.builtin.template', 'openwrt-transport-failover.sh.j2')
+        | list
+        | batch(512)
+        | map('join')
+        | list
+      }}
   when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
 
 - name: Remove legacy 3x-ui-named OpenWrt transport failover artifacts
@@ -84,13 +112,23 @@
 
 - name: Install 3x-ui OpenWrt LAN intercept failover script
   ansible.builtin.raw: |
+    tmp='/tmp/{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}.ansible'
+    if [ '{{ script_chunk_index }}' = 0 ]; then : > "$tmp"; fi
+    printf '%s' {{ item | quote }} >> "$tmp"
+  loop: "{{ openwrt_xp2p_three_x_ui_intercept_failover_script_chunks }}"
+  loop_control:
+    index_var: script_chunk_index
+    label: "script chunk {{ script_chunk_index + 1 }}"
+  register: openwrt_xp2p_three_x_ui_intercept_failover_script_chunks_result
+  changed_when: false
+  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+
+- name: Activate 3x-ui OpenWrt LAN intercept failover script
+  ansible.builtin.raw: |
     changed=false
     target='{{ openwrt_xp2p_three_x_ui_intercept_failover_script_path }}'
     tmp='/tmp/{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}.ansible'
     mkdir -p "$(dirname "$target")"
-    cat > "$tmp" <<'__ANSIBLE_XP2PC_LAN_INTERCEPT_FAILOVER__'
-    {{ openwrt_xp2p_three_x_ui_intercept_failover_script_content }}
-    __ANSIBLE_XP2PC_LAN_INTERCEPT_FAILOVER__
     chmod 0755 "$tmp"
     if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
       mv "$tmp" "$target"

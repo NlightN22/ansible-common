@@ -7,6 +7,8 @@ log_tag="$instance_name"
 transport_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_interface }}'
 route_table='{{ openwrt_xp2p_three_x_ui_intercept_failover_table }}'
 rule_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_rule_section }}'
+route_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_route_section }}'
+wan_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_wan_interface }}'
 routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
 state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
 backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
@@ -34,8 +36,8 @@ intercept_disabled() {
 }
 
 route_table_has_default() {
-  ip route show table "$route_table" 2>/dev/null | grep -E '^default([[:space:]]|$)' |
-    grep -F " dev ${transport_interface}" >/dev/null
+  ip route show table "$route_table" 2>/dev/null |
+    grep -E '^default([[:space:]]|$)' >/dev/null
 }
 
 transport_status() {
@@ -71,16 +73,37 @@ candidate_healthy() {
   candidate_type="$1"
   candidate_tag="$2"
   expected_ip="$3"
+  independent_probe="$4"
   if [ "$candidate_type" = wan_direct ]; then
-    curl -fsS --connect-timeout 3 --max-time 8 https://api.myip.la >/dev/null 2>&1
+    [ -n "$wan_interface" ] || return 1
+    curl --interface "$wan_interface" -fsS --connect-timeout 3 --max-time 8 https://api.myip.la >/dev/null 2>&1
     return $?
   fi
-  [ "$candidate_type" = xp2p_xray ] || return 1
-  [ "$candidate_tag" != "" ] || return 1
-  transport_enabled "$candidate_tag" || return 1
-  [ "$(transport_status "$candidate_tag")" = healthy ] ||
-    [ "$(transport_status "$candidate_tag")" = alive ] || return 1
-  return 0
+  if [ "$candidate_type" = xp2p_xray ]; then
+    [ "$candidate_tag" != "" ] || return 1
+    transport_enabled "$candidate_tag" || return 1
+    active_tag="$(active_transport)"
+    if [ "$candidate_tag" != "$active_tag" ] && [ "$independent_probe" != true ]; then
+      switch_routing_outbound "$candidate_tag" "$expected_ip"
+      return $?
+    fi
+    [ "$(transport_status "$candidate_tag")" = healthy ] ||
+      [ "$(transport_status "$candidate_tag")" = alive ] || return 1
+    socks_probe "$expected_ip"
+    return $?
+  fi
+  if [ "$candidate_type" = wireguard ]; then
+    candidate_interface="$candidate_tag"
+    candidate_endpoint="$expected_ip"
+    ip link show "$candidate_interface" >/dev/null 2>&1 || return 1
+    ip route get "$candidate_endpoint" >/dev/null 2>&1 || return 1
+    command -v wg >/dev/null 2>&1 || return 1
+    now="$(date +%s)"
+    for handshake in $(wg show "$candidate_interface" latest-handshakes 2>/dev/null | awk '{print $2}' || true); do
+      [ "$handshake" -gt 0 ] && [ "$((now - handshake))" -le 180 ] && return 0
+    done
+  fi
+  return 1
 }
 
 active_transport() {
@@ -161,8 +184,8 @@ enable_intercept_rule() {
 
 select_transport() {
 {% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates %}
-  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default('') }}' '{{ candidate.expected_public_ip | default('') }}'; then
-    printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default('') }}'
+  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}'; then
+    printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}'
     return 0
   fi
 {% endfor %}
@@ -180,7 +203,7 @@ current_transport="$(active_transport)"
 preferred_tag='{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).outbound_tag | default('') }}'
 preferred_healthy=false
 if candidate_healthy '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).type }}' \
-    "$preferred_tag" '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).expected_public_ip | default('') }}'; then
+    "$preferred_tag" '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}'; then
   preferred_healthy=true
 fi
 preferred_failures="$(state_value preferred_failures 0)"
@@ -232,6 +255,16 @@ if [ "$selected_type" = xp2p_xray ]; then
       log "failed to switch managed Xray outbound to ${selected_tag}; intercept remains unchanged"
       exit 1
     }
+  fi
+  [ "$restore_intercept_when_alive" = true ] && enable_intercept_rule
+elif [ "$selected_type" = wireguard ]; then
+  selected_interface="$selected_tag"
+  if [ "$current_transport" != "$selected_interface" ]; then
+    uci set "network.${route_section}.interface=${selected_interface}"
+    uci commit network
+    /etc/init.d/network reload >/dev/null 2>&1 || true
+    write_state "$selected_interface" 0 0
+    log "switched managed intercept route to WireGuard interface ${selected_interface}"
   fi
   [ "$restore_intercept_when_alive" = true ] && enable_intercept_rule
 else
