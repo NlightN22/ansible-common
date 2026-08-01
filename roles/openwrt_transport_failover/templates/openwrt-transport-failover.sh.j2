@@ -63,10 +63,28 @@ transport_enabled() {
 
 socks_probe() {
   expected_ip="$1"
+  probe_urls="$2"
+  required_successes="$3"
   [ "$use_socks_smoke" = "true" ] || return 0
-  probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" -fsS --connect-timeout 3 --max-time 8 \
-    'https://api.myip.la' 2>/dev/null | tr -d '\r\n' || true)"
-  [ "$probe_output" = "$expected_ip" ]
+  probe_successes=0
+  for probe_url in $(printf '%s' "$probe_urls" | tr '|' ' '); do
+    probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" -fsS --connect-timeout 3 --max-time 8 \
+      "$probe_url" 2>/dev/null | tr -d '\r\n' || true)"
+    [ "$probe_output" = "$expected_ip" ] && probe_successes=$((probe_successes + 1))
+  done
+  [ "$probe_successes" -ge "$required_successes" ]
+}
+
+wan_probe() {
+  probe_urls="$1"
+  required_successes="$2"
+  [ "$use_socks_smoke" = "true" ] || return 0
+  probe_successes=0
+  for probe_url in $(printf '%s' "$probe_urls" | tr '|' ' '); do
+    curl --interface "$wan_interface" -fsS --connect-timeout 3 --max-time 8 \
+      "$probe_url" >/dev/null 2>&1 && probe_successes=$((probe_successes + 1))
+  done
+  [ "$probe_successes" -ge "$required_successes" ]
 }
 
 candidate_healthy() {
@@ -74,9 +92,11 @@ candidate_healthy() {
   candidate_tag="$2"
   expected_ip="$3"
   independent_probe="$4"
+  probe_urls="$5"
+  required_successes="$6"
   if [ "$candidate_type" = wan_direct ]; then
     [ -n "$wan_interface" ] || return 1
-    curl --interface "$wan_interface" -fsS --connect-timeout 3 --max-time 8 https://api.myip.la >/dev/null 2>&1
+    wan_probe "$probe_urls" "$required_successes"
     return $?
   fi
   if [ "$candidate_type" = xp2p_xray ]; then
@@ -84,12 +104,12 @@ candidate_healthy() {
     transport_enabled "$candidate_tag" || return 1
     active_tag="$(active_transport)"
     if [ "$candidate_tag" != "$active_tag" ] && [ "$independent_probe" != true ]; then
-      switch_routing_outbound "$candidate_tag" "$expected_ip"
+      switch_routing_outbound "$candidate_tag" "$expected_ip" "$probe_urls" "$required_successes"
       return $?
     fi
     [ "$(transport_status "$candidate_tag")" = healthy ] ||
       [ "$(transport_status "$candidate_tag")" = alive ] || return 1
-    socks_probe "$expected_ip"
+    socks_probe "$expected_ip" "$probe_urls" "$required_successes"
     return $?
   fi
   if [ "$candidate_type" = wireguard ]; then
@@ -139,6 +159,8 @@ write_state() {
 switch_routing_outbound() {
   desired_tag="$1"
   expected_ip="$2"
+  probe_urls="$3"
+  required_successes="$4"
   current_tag="$(active_transport)"
   [ "$current_tag" = "$desired_tag" ] && return 0
   [ -f "$routing_file" ] || return 1
@@ -155,7 +177,7 @@ switch_routing_outbound() {
   mv "$tmp_file" "$routing_file"
   xp2p client service restart >/dev/null 2>&1 || { mv "$rollback_file" "$routing_file"; return 1; }
   sleep 15
-  if ! socks_probe "$expected_ip"; then
+  if ! socks_probe "$expected_ip" "$probe_urls" "$required_successes"; then
     mv "$rollback_file" "$routing_file"
     xp2p client service restart >/dev/null 2>&1 || true
     sleep 15
@@ -184,7 +206,7 @@ enable_intercept_rule() {
 
 select_transport() {
 {% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates %}
-  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}'; then
+  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}' '{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}' '{{ candidate.probe_policy.required_successes | default(1) | int }}'; then
     printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}'
     return 0
   fi
@@ -203,7 +225,7 @@ current_transport="$(active_transport)"
 preferred_tag='{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).outbound_tag | default('') }}'
 preferred_healthy=false
 if candidate_healthy '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).type }}' \
-    "$preferred_tag" '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}'; then
+    "$preferred_tag" '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).probe_policy.required_successes | default(1) | int }}'; then
   preferred_healthy=true
 fi
 preferred_failures="$(state_value preferred_failures 0)"

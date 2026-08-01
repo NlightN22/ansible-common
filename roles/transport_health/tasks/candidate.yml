@@ -73,10 +73,21 @@
         elif ! command -v curl >/dev/null 2>&1; then
           failure_reason=required_curl_missing_for_socks_probe
         else
+          probe_successes=0
+          probe_count=0
           {% for probe in transport_health_candidate.probes | default([]) %}
-          check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' || true
+          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}'; then
+            probe_successes=$((probe_successes + 1))
+          fi
+          probe_count=$((probe_count + 1))
           {% endfor %}
-          if [ "$failure_reason" = none ]; then transport_status=healthy; fi
+          required_probe_successes='{{ transport_health_candidate.probe_policy.required_successes | default(1) | int }}'
+          if [ "$probe_successes" -ge "$required_probe_successes" ]; then
+            transport_status=healthy
+            failure_reason=none
+          else
+            failure_reason="probe_quorum_${probe_successes}_${required_probe_successes}"
+          fi
         fi
         ;;
       wan_direct)
