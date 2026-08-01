@@ -1,4 +1,5 @@
 ---
 transport_health_model: {}
 transport_health_router_model: {}
+transport_health_candidates: []
 transport_health_fail_on_dead: true
