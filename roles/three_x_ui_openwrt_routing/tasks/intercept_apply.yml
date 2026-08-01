@@ -155,10 +155,10 @@
       changed=true
     fi
     current_entries="$( (uci -q get "${private_set_section}.entry" 2>/dev/null || true) | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    desired_entries="$(printf '%s\n' {% for cidr in ((openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) + (openwrt_xp2p_three_x_ui_routing.intercept.destination_exclusions | default([]))) %}'{{ cidr }}' {% endfor %} | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    desired_entries="$(printf '%s\n' {% for cidr in (openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) %}'{{ cidr }}' {% endfor %} | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     if [ "$current_entries" != "$desired_entries" ]; then
       uci -q delete "${private_set_section}.entry" || true
-      for cidr in {% for cidr in ((openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) + (openwrt_xp2p_three_x_ui_routing.intercept.destination_exclusions | default([]))) %}'{{ cidr }}' {% endfor %}; do
+      for cidr in {% for cidr in (openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) %}'{{ cidr }}' {% endfor %}; do
         uci add_list "${private_set_section}.entry=$cidr"
       done
       changed=true

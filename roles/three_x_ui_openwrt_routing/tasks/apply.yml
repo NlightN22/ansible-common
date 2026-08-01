@@ -29,6 +29,8 @@
     three_x_ui_openwrt_routing_final_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default('direct') }}"
     three_x_ui_openwrt_routing_proxy_routes: "{{ openwrt_xp2p_three_x_ui_proxy_routes }}"
     three_x_ui_openwrt_routing_proxy_route_outbound_tag: "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
+    three_x_ui_openwrt_routing_xray_direct_cidrs: "{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs }}"
+    three_x_ui_openwrt_routing_xray_direct_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.xray_direct_outbound_tag | default('direct') }}"
   delegate_to: localhost
   run_once: true
 
@@ -59,6 +61,22 @@
         in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
     fail_msg: "Proxy route CIDR {{ item }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
   loop: "{{ openwrt_xp2p_three_x_ui_proxy_routes | map(attribute='ipv4_cidrs', default=[]) | flatten | unique | list }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate rendered 3x-ui OpenWrt Xray direct routing CIDRs on control host
+  ansible.builtin.assert:
+    that:
+      - >-
+        '"outboundTag": "' ~ (openwrt_xp2p_three_x_ui_routing.xray_direct_outbound_tag | default('direct')) ~ '"'
+        in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
+      - >-
+        '"' ~ item ~ '"'
+        in lookup('ansible.builtin.file', openwrt_xp2p_three_x_ui_routing_cache_dir ~ '/' ~ openwrt_xp2p_three_x_ui_routing_star.id ~ '/routing.rules.after-xp2p-managed.json')
+  fail_msg: "Xray direct route CIDR {{ item }} was not rendered for {{ openwrt_xp2p_three_x_ui_routing_star.id }}."
+  loop: "{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs }}"
   loop_control:
     label: "{{ item }}"
   delegate_to: localhost

@@ -63,6 +63,18 @@
       exit 1
     fi
     {% endfor %}
+    direct_outbound_tag='{{ openwrt_xp2p_three_x_ui_routing.xray_direct_outbound_tag | default("direct") }}'
+    {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
+    if ! grep -F -- '"{{ cidr }}"' "$routing_file" >/dev/null 2>&1; then
+      echo "ROUTING_DIRECT_CIDR_MISSING cidr={{ cidr }} outbound=${direct_outbound_tag}"
+      exit 1
+    fi
+    {% endfor %}
+    if [ '{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs | length }}' -gt 0 ] &&
+       ! grep -F -- '"outboundTag": "'"$direct_outbound_tag"'"' "$routing_file" >/dev/null 2>&1; then
+      echo "ROUTING_DIRECT_OUTBOUND_MISSING outbound=${direct_outbound_tag}"
+      exit 1
+    fi
     grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' "$routing_file" >/dev/null
     grep -F '"network": "tcp,udp"' "$routing_file" >/dev/null
     if ! grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' "$routing_file" >/dev/null 2>&1; then
@@ -179,9 +191,15 @@
     test "$(uci -q get "firewall.${private_set_name}")" = ipset
     test "$(uci -q get "firewall.${private_set_name}.name")" = "$private_set_name"
     test "$(uci -q get "firewall.${private_set_name}.match")" = dest_net
-    for cidr in {% for cidr in ((openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) + (openwrt_xp2p_three_x_ui_routing.intercept.destination_exclusions | default([]))) %}'{{ cidr }}' {% endfor %}; do
+    for cidr in {% for cidr in (openwrt_xp2p_three_x_ui_routing.intercept.private_cidrs | default(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15", "127.0.0.0/8"])) %}'{{ cidr }}' {% endfor %}; do
       uci -q get "firewall.${private_set_name}.entry" | tr ' ' '\n' | grep -Fx "$cidr" >/dev/null
     done
+    {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
+    if uci -q get "firewall.${private_set_name}.entry" | tr ' ' '\n' | grep -Fx '{{ cidr }}' >/dev/null 2>&1; then
+      echo "LAN_INTERCEPT_DIRECT_CIDR_STILL_LOCAL cidr={{ cidr }}"
+      exit 1
+    fi
+    {% endfor %}
     check_source_exclusions() {
       section="$1"
       test "$(uci -q get "firewall.${section}.extra" 2>/dev/null || true)" = ""
