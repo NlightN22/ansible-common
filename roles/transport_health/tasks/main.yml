@@ -1,0 +1,128 @@
+---
+- name: Validate normalized transport health input
+  ansible.builtin.assert:
+    that:
+      - transport_health_model is mapping
+      - transport_health_model.id is string
+      - transport_health_model.type in ['xp2p_xray', 'wireguard', 'wan_direct']
+      - transport_health_router_model is mapping
+      - transport_health_router_model.transports.preferred == transport_health_model.id
+    fail_msg: >-
+      Transport health requires one selected declared transport model matching
+      the router preferred transport on {{ inventory_hostname }}.
+
+- name: Run selected transport health adapter
+  ansible.builtin.raw: |
+    set -eu
+    transport_id='{{ transport_health_model.id }}'
+    transport_type='{{ transport_health_model.type }}'
+    transport_status=dead
+    failure_reason=none
+
+    fetch_url() {
+      request_url="$1"
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsS --connect-timeout 8 --max-time 30 "$request_url"
+      elif command -v wget >/dev/null 2>&1; then
+        wget -T 30 -qO- "$request_url"
+      else
+        return 127
+      fi
+    }
+
+    fetch_socks_url() {
+      request_url="$1"
+      socks_port="$2"
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsS --socks5-hostname "127.0.0.1:${socks_port}" --connect-timeout 8 --max-time 30 "$request_url"
+      else
+        return 127
+      fi
+    }
+
+    check_egress_probe() {
+      probe_kind="$1"
+      probe_url="$2"
+      expected_ip="$3"
+      if [ "$probe_kind" = socks_http ]; then
+        probe_output="$(fetch_socks_url "$probe_url" '{{ transport_health_model.dataplane.socks_port | default(51180) }}' || true)"
+      else
+        probe_output="$(fetch_url "$probe_url" || true)"
+      fi
+      actual_ip="$(printf '%s\n' "$probe_output" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+      if [ -z "$actual_ip" ]; then
+        failure_reason="probe_${probe_kind}_empty"
+        return 1
+      fi
+      if [ -n "$expected_ip" ] && [ "$actual_ip" != "$expected_ip" ]; then
+        failure_reason="probe_${probe_kind}_expected_${expected_ip}_got_${actual_ip}"
+        return 1
+      fi
+      echo "PROBE_OK kind=${probe_kind} url=${probe_url} egress=${actual_ip}"
+      return 0
+    }
+
+    case "$transport_type" in
+      xp2p_xray)
+        interface='{{ transport_health_model.dataplane.interface | default('') }}'
+        if ! ip link show "$interface" >/dev/null 2>&1; then
+          failure_reason="interface_missing_${interface}"
+        elif ! command -v curl >/dev/null 2>&1; then
+          failure_reason=required_curl_missing_for_socks_probe
+        else
+          {% for probe in transport_health_model.probes | default([]) %}
+          check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' || true
+          {% endfor %}
+          if [ "$failure_reason" = none ]; then transport_status=healthy; fi
+        fi
+        ;;
+      wan_direct)
+        {% for probe in transport_health_model.probes | default([]) %}
+        check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' || true
+        {% endfor %}
+        if [ "$failure_reason" = none ]; then transport_status=healthy; fi
+        ;;
+      wireguard)
+        interface='{{ transport_health_model.dataplane.interface | default('') }}'
+        endpoint='{{ transport_health_model.endpoint.host | default('') }}'
+        if ! ip link show "$interface" >/dev/null 2>&1; then
+          failure_reason="interface_missing_${interface}"
+        elif ! ip route get "$endpoint" >/dev/null 2>&1; then
+          failure_reason="endpoint_route_missing_${endpoint}"
+        else
+          transport_status=healthy
+        fi
+        ;;
+    esac
+    echo "TRANSPORT_ID=${transport_id}"
+    echo "TRANSPORT_TYPE=${transport_type}"
+    echo "TRANSPORT_STATUS=${transport_status}"
+    echo "TRANSPORT_FAILURE_REASON=${failure_reason}"
+    [ "$transport_status" = healthy ] || exit 1
+  register: transport_health_adapter_result
+  changed_when: false
+  failed_when: false
+
+- name: Normalize transport health result
+  ansible.builtin.set_fact:
+    transport_health_status: >-
+      {{ 'healthy' if transport_health_adapter_result.rc | int == 0 else 'dead' }}
+    transport_health_failure_reason: >-
+      {{ transport_health_adapter_result.stdout | regex_findall('TRANSPORT_FAILURE_REASON=([^\n]+)') | first | default('adapter_failed', true) }}
+
+- name: Report normalized transport health
+  ansible.builtin.debug:
+    msg:
+      transport: "{{ transport_health_model.id }}"
+      type: "{{ transport_health_model.type }}"
+      status: "{{ transport_health_status }}"
+      failure_reason: "{{ transport_health_failure_reason }}"
+
+- name: Fail when the selected transport is not healthy
+  ansible.builtin.assert:
+    that:
+      - transport_health_status == 'healthy'
+    fail_msg: >-
+      Transport {{ transport_health_model.id }} is {{ transport_health_status }}
+      on {{ inventory_hostname }}: {{ transport_health_failure_reason }}
+  when: transport_health_fail_on_dead | bool

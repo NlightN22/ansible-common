@@ -210,6 +210,25 @@ def _add_three_x_ui_state(state: dict[str, list[dict[str, Any]]], star: dict[str
     state[route_bucket].append({"target": "default", "interface": interface, "table": table, "source": source})
 
 
+def _add_xp2p_state(state: dict[str, list[dict[str, Any]]], star: dict[str, Any], host: str) -> None:
+    """Publish explicit XP2P retired-endpoint underlay route exclusions."""
+    clients = star.get("clients", []) or []
+    if not any(isinstance(client, dict) and client.get("host") == host for client in clients):
+        return
+    source = f"xp2p:{star.get('id', 'unknown')}:retired_redirect"
+    for redirect in star.get("retired_server_redirects", []) or []:
+        if not isinstance(redirect, dict) or not redirect.get("cidr"):
+            continue
+        state["excluded_routes"].append(
+            {
+                "target": redirect["cidr"],
+                "interface_role": "wan",
+                "purpose": "retired_endpoint_redirect",
+                "source": source,
+            }
+        )
+
+
 def openwrt_route_control_declared_state(fragments: Any, host: str) -> dict[str, list[dict[str, Any]]]:
     state = {
         "declared_routes": [],
@@ -222,6 +241,8 @@ def openwrt_route_control_declared_state(fragments: Any, host: str) -> dict[str,
             continue
         if isinstance(fragment.get("wireguard_site"), dict):
             _add_wireguard_state(state, _as_mapping(fragment["wireguard_site"], "wireguard_site"), host)
+        if isinstance(fragment.get("xp2p_star"), dict):
+            _add_xp2p_state(state, _as_mapping(fragment["xp2p_star"], "xp2p_star"), host)
         if isinstance(fragment.get("three_x_ui_star"), dict):
             _add_three_x_ui_state(state, _as_mapping(fragment["three_x_ui_star"], "three_x_ui_star"), host)
     state["declared_routes"] = _dedupe(state["declared_routes"], ("target", "interface", "table", "via"))
