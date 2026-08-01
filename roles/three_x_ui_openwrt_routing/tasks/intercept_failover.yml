@@ -15,12 +15,8 @@
     openwrt_xp2p_three_x_ui_intercept_failover_script_path: "{{ openwrt_xp2p_three_x_ui_intercept_failover.script_path | default('/usr/local/sbin/xp2pc-lan-intercept-failover') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_service_path: "{{ openwrt_xp2p_three_x_ui_intercept_failover.service_path | default('/etc/init.d/xp2pc-lan-intercept-failover') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_interval_seconds: "{{ openwrt_xp2p_three_x_ui_intercept_failover.interval_seconds | default(10) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds: "{{ openwrt_xp2p_three_x_ui_intercept_failover.switch_delay_seconds | default(30) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_restore_switch_delay_seconds: >-
-      {{
-        openwrt_xp2p_three_x_ui_intercept_failover.restore_switch_delay_seconds
-        | default(openwrt_xp2p_three_x_ui_intercept_failover.switch_delay_seconds | default(30))
-      }}
+    openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures: "{{ openwrt_xp2p_three_x_ui_intercept_failover.dead_after_failures | default(3) }}"
+    openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes: "{{ openwrt_xp2p_three_x_ui_intercept_failover.restore_after_successes | default(3) }}"
     openwrt_xp2p_three_x_ui_intercept_failover_disable_intercept_when_dead: "{{ openwrt_xp2p_three_x_ui_intercept_failover.disable_intercept_when_dead | default(true) }}"
     openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive: "{{ openwrt_xp2p_three_x_ui_intercept_failover.restore_intercept_when_alive | default(true) }}"
     openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke: "{{ openwrt_xp2p_three_x_ui_intercept_failover.use_socks_smoke | default(true) }}"
@@ -44,8 +40,8 @@
       - openwrt_xp2p_three_x_ui_intercept_failover_table | string | length > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_rule_section | length > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_interval_seconds | int > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds | int >= 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_restore_switch_delay_seconds | int >= openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds | int
+      - openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures | int > 0
+      - openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes | int > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_script_path | length > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_service_path | length > 0
       - openwrt_xp2p_three_x_ui_intercept_failover_routing_file | length > 0

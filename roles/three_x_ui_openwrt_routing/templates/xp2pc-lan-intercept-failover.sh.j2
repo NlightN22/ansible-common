@@ -10,12 +10,18 @@ rule_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_rule_section }}'
 routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
 state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
 backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
-switch_delay_seconds='{{ openwrt_xp2p_three_x_ui_intercept_failover_switch_delay_seconds | int }}'
-restore_switch_delay_seconds='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_switch_delay_seconds | int }}'
+lock_dir="${state_file}.lock"
+dead_after_failures='{{ openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures | int }}'
+restore_after_successes='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes | int }}'
 disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disable_intercept_when_dead | bool | lower }}'
 restore_intercept_when_alive='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive | bool | lower }}'
 use_socks_smoke='{{ openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool | lower }}'
 socks_port='{{ openwrt_xp2p_three_x_ui_intercept_failover_socks_port | int }}'
+
+if ! mkdir "$lock_dir" 2>/dev/null; then
+  exit 0
+fi
+trap 'rmdir "$lock_dir" 2>/dev/null || true' 0 1 2 3 15
 
 log() {
   logger -t "$log_tag" "$*"
@@ -83,6 +89,30 @@ active_transport() {
   fi
 }
 
+state_value() {
+  key="$1"
+  default_value="$2"
+  value=''
+  if [ -f "$state_file" ]; then
+    value="$(sed -n "s/^${key}=//p" "$state_file" | head -n 1)"
+  fi
+  [ -n "$value" ] && printf '%s\n' "$value" || printf '%s\n' "$default_value"
+}
+
+write_state() {
+  state_active="$1"
+  state_failures="$2"
+  state_successes="$3"
+  state_tmp="${state_file}.tmp.$$"
+  mkdir -p "$(dirname "$state_file")"
+  {
+    printf 'active_transport=%s\n' "$state_active"
+    printf 'preferred_failures=%s\n' "$state_failures"
+    printf 'preferred_successes=%s\n' "$state_successes"
+  } > "$state_tmp"
+  mv "$state_tmp" "$state_file"
+}
+
 switch_routing_outbound() {
   desired_tag="$1"
   expected_ip="$2"
@@ -109,7 +139,7 @@ switch_routing_outbound() {
     return 1
   fi
   rm -f "$rollback_file"
-  printf 'active_transport=%s\n' "$desired_tag" > "$state_file"
+  write_state "$desired_tag" 0 0
   log "switched managed Xray outbound to ${desired_tag}"
 }
 
@@ -145,9 +175,45 @@ if ! route_table_has_default; then
 fi
 
 selection="$(select_transport || true)"
+current_transport="$(active_transport)"
+
+preferred_tag='{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).outbound_tag | default('') }}'
+preferred_healthy=false
+if candidate_healthy '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).type }}' \
+    "$preferred_tag" '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).expected_public_ip | default('') }}'; then
+  preferred_healthy=true
+fi
+preferred_failures="$(state_value preferred_failures 0)"
+preferred_successes="$(state_value preferred_successes 0)"
+
+if [ "$current_transport" = "$preferred_tag" ]; then
+  if [ "$preferred_healthy" = true ]; then
+    write_state "$current_transport" 0 0
+  else
+    preferred_failures=$((preferred_failures + 1))
+    write_state "$current_transport" "$preferred_failures" 0
+    if [ "$preferred_failures" -lt "$dead_after_failures" ]; then
+      log "preferred transport is unhealthy; waiting for ${dead_after_failures} consecutive failures (${preferred_failures}/${dead_after_failures})"
+      exit 0
+    fi
+    log "preferred transport failure threshold reached; failover is allowed"
+  fi
+elif [ -n "$current_transport" ] && [ "$preferred_healthy" = true ]; then
+  preferred_successes=$((preferred_successes + 1))
+  write_state "$current_transport" 0 "$preferred_successes"
+  if [ "$preferred_successes" -lt "$restore_after_successes" ]; then
+    log "preferred transport recovered; waiting for ${restore_after_successes} consecutive successes (${preferred_successes}/${restore_after_successes})"
+    exit 0
+  fi
+  log "preferred transport recovery threshold reached; restore is allowed"
+else
+  write_state "$current_transport" 0 0
+fi
+
 if [ -z "$selection" ]; then
   [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
-  log "no healthy transport candidate; leaving managed outbound unchanged"
+  write_state "wan_direct" 0 0
+  log "no healthy transport candidate; WAN direct fallback is active"
   exit 0
 fi
 
@@ -155,11 +221,9 @@ selected_id="${selection%%|*}"
 selected_rest="${selection#*|}"
 selected_type="${selected_rest%%|*}"
 selected_tag="${selected_rest#*|}"
-current_transport="$(active_transport)"
 
 if [ "$selected_type" = xp2p_xray ]; then
   if [ "$current_transport" != "$selected_tag" ]; then
-    [ -n "$current_transport" ] && [ "$selected_id" = xp2p_dcpkt2 ] && sleep "$restore_switch_delay_seconds"
     selected_expected_ip=""
 {% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates if candidate.type == 'xp2p_xray' %}
     [ "$selected_id" = '{{ candidate.id }}' ] && selected_expected_ip='{{ candidate.expected_public_ip }}'
@@ -172,5 +236,6 @@ if [ "$selected_type" = xp2p_xray ]; then
   [ "$restore_intercept_when_alive" = true ] && enable_intercept_rule
 else
   [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
+  write_state "wan_direct" 0 0
 fi
 log "selected transport ${selected_id}"
