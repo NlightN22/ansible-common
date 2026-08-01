@@ -189,7 +189,12 @@ def openwrt_route_control_wireguard_cidr_violations(fragments: Any) -> list[dict
     return violations
 
 
-def _add_three_x_ui_state(state: dict[str, list[dict[str, Any]]], star: dict[str, Any], host: str) -> None:
+def _add_three_x_ui_state(
+    state: dict[str, list[dict[str, Any]]],
+    star: dict[str, Any],
+    host: str,
+    selected_transport: dict[str, Any] | None = None,
+) -> None:
     client = _three_x_ui_client(star, host)
     if not client:
         return
@@ -206,6 +211,8 @@ def _add_three_x_ui_state(state: dict[str, list[dict[str, Any]]], star: dict[str
     source = f"three_x_ui:{star.get('id', 'unknown')}:intercept"
     failover = intercept.get("failover", {}) or {}
     dynamic = failover.get("enabled", False) and failover.get("disable_intercept_when_dead", False)
+    if selected_transport:
+        dynamic = selected_transport.get("type") == "wan_direct"
     route_bucket = "excluded_routes" if dynamic else "declared_routes"
     rule_bucket = "excluded_rules" if dynamic else "declared_rules"
     state[rule_bucket].append({"priority": "100", "fwmark": mark, "lookup": table, "source": source})
@@ -231,7 +238,11 @@ def _add_xp2p_state(state: dict[str, list[dict[str, Any]]], star: dict[str, Any]
         )
 
 
-def openwrt_route_control_declared_state(fragments: Any, host: str) -> dict[str, list[dict[str, Any]]]:
+def openwrt_route_control_declared_state(
+    fragments: Any,
+    host: str,
+    selected_transport: dict[str, Any] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     state = {
         "declared_routes": [],
         "declared_rules": [],
@@ -246,7 +257,12 @@ def openwrt_route_control_declared_state(fragments: Any, host: str) -> dict[str,
         if isinstance(fragment.get("xp2p_star"), dict):
             _add_xp2p_state(state, _as_mapping(fragment["xp2p_star"], "xp2p_star"), host)
         if isinstance(fragment.get("three_x_ui_star"), dict):
-            _add_three_x_ui_state(state, _as_mapping(fragment["three_x_ui_star"], "three_x_ui_star"), host)
+            _add_three_x_ui_state(
+                state,
+                _as_mapping(fragment["three_x_ui_star"], "three_x_ui_star"),
+                host,
+                selected_transport,
+            )
     state["declared_routes"] = _dedupe(state["declared_routes"], ("target", "interface", "table", "via"))
     state["declared_rules"] = _dedupe(state["declared_rules"], ("priority", "fwmark", "lookup", "from", "to"))
     state["excluded_routes"] = _dedupe(state["excluded_routes"], ("target", "interface", "table", "via"))

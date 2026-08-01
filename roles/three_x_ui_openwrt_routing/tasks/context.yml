@@ -17,12 +17,83 @@
     openwrt_xp2p_three_x_ui_routing_defaults: "{{ openwrt_xp2p_three_x_ui_routing_star.openwrt_routing | default({}) }}"
     openwrt_xp2p_three_x_ui_routing_client_settings: "{{ openwrt_xp2p_three_x_ui_routing_client.openwrt_routing | default({}) }}"
 
+- name: Initialize 3x-ui OpenWrt transport candidate definitions
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_candidate_inputs: >-
+      {{
+        (
+          openwrt_xp2p_three_x_ui_routing_defaults.transport_candidates
+          | default([])
+        )
+        + (
+          openwrt_xp2p_three_x_ui_routing_client_settings.transport_candidates
+          | default([])
+        )
+      }}
+    openwrt_xp2p_three_x_ui_transport_candidates: []
+
+- name: Load 3x-ui OpenWrt transport definitions by ID
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/transports/{{ item }}.yml"
+    name: openwrt_xp2p_three_x_ui_transport_document
+  loop: >-
+    {{
+      openwrt_xp2p_three_x_ui_transport_candidate_inputs
+      | select('string')
+      | unique
+      | list
+    }}
+  register: openwrt_xp2p_three_x_ui_transport_definition_loads
+
+- name: Normalize 3x-ui OpenWrt transport candidate definitions
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_candidates: []
+
+- name: Publish normalized 3x-ui OpenWrt transport candidate
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_candidates: >-
+      {{
+        openwrt_xp2p_three_x_ui_transport_candidates
+        + [
+            item.ansible_facts.openwrt_xp2p_three_x_ui_transport_document.transport
+            | combine({
+                'outbound_tag': (
+                  item.ansible_facts.openwrt_xp2p_three_x_ui_transport_document.transport.dataplane.outbound_tag
+                  | default('')
+                ),
+                'expected_public_ip': (
+                  item.ansible_facts.openwrt_xp2p_three_x_ui_transport_document.transport.probes
+                  | selectattr('type', 'equalto', 'socks_http')
+                  | map(attribute='expected_public_ip')
+                  | select('defined')
+                  | first
+                  | default('')
+                )
+              }, recursive=True)
+          ]
+      }}
+  loop: "{{ openwrt_xp2p_three_x_ui_transport_definition_loads.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
 - name: Build effective 3x-ui OpenWrt routing settings
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_routing: >-
       {{
         openwrt_xp2p_three_x_ui_routing_defaults
         | combine(openwrt_xp2p_three_x_ui_routing_client_settings, recursive=True)
+        | combine({
+            'transport_candidates': openwrt_xp2p_three_x_ui_transport_candidates,
+            'proxy_outbound_tag': (
+              openwrt_xp2p_three_x_ui_transport_candidates | first
+            ).dataplane.outbound_tag | default(''),
+            'proxy_route_outbound_tag': (
+              openwrt_xp2p_three_x_ui_transport_candidates | first
+            ).dataplane.outbound_tag | default(''),
+            'socks_port': (
+              openwrt_xp2p_three_x_ui_transport_candidates | first
+            ).dataplane.socks_port | default(0)
+          }, recursive=True)
       }}
 
 - name: Build 3x-ui OpenWrt required access context
@@ -103,6 +174,13 @@
       - openwrt_xp2p_three_x_ui_routing.socks_egress_checks | default([]) | length > 0
       - openwrt_xp2p_three_x_ui_transport_candidates | length >= 2
       - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='id') | list | last == 'wan_direct'
+      - >-
+        openwrt_xp2p_three_x_ui_transport_candidates
+        | map(attribute='id')
+        | list
+        == openwrt_xp2p_three_x_ui_transport_candidate_inputs
+        | map('string')
+        | list
       - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='outbound_tag', default='') | list | select('equalto', '') | list | length == 1
       - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='expected_public_ip', default='') | list | select('equalto', '') | list | length == 1
       - >-

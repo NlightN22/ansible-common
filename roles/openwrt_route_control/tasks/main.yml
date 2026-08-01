@@ -38,7 +38,10 @@
     openwrt_route_control_projected_state: >-
       {{
         openwrt_route_control_loaded_model_fragments
-        | ansible_common.core.openwrt_route_control_declared_state(inventory_hostname)
+        | ansible_common.core.openwrt_route_control_declared_state(
+            inventory_hostname,
+            openwrt_route_control_selected_transport | default(none)
+          )
       }}
 
 - name: Publish effective OpenWrt route control state
