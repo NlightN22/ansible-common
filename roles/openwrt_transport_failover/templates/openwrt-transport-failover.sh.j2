@@ -132,6 +132,11 @@ candidate_healthy() {
 }
 
 active_transport() {
+  routing_tag="$(routing_active_transport)"
+  if [ -n "$routing_tag" ]; then
+    printf '%s\n' "$routing_tag"
+    return 0
+  fi
   if [ -f "$state_file" ]; then
     sed -n 's/^active_transport=//p' "$state_file" | head -n 1
   fi
@@ -153,12 +158,37 @@ write_state() {
   state_successes="$3"
   state_tmp="${state_file}.tmp.$$"
   mkdir -p "$(dirname "$state_file")"
+  routing_tag="$(routing_active_transport)"
   {
-    printf 'active_transport=%s\n' "$state_active"
+    # Xray active transport is owned by the terminal routing rule. Do not
+    # persist a second candidate value that an external XP2P watcher can
+    # invalidate between two failover cycles.
+    if [ -z "$routing_tag" ]; then
+      printf 'active_transport=%s\n' "$state_active"
+    fi
     printf 'preferred_failures=%s\n' "$state_failures"
     printf 'preferred_successes=%s\n' "$state_successes"
   } > "$state_tmp"
   mv "$state_tmp" "$state_file"
+}
+
+routing_active_transport() {
+  [ -f "$routing_file" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  jq -r --argjson candidates "$candidate_tags_json" '
+    .rules[-1].outboundTag as $tag |
+    if ($tag != null and ($candidates | index($tag)) != null) then $tag else "" end
+  ' "$routing_file" 2>/dev/null || true
+}
+
+reconcile_state_with_routing() {
+  actual_tag="$(routing_active_transport)"
+  [ -n "$actual_tag" ] || return 0
+  recorded_tag="$(active_transport)"
+  if [ "$recorded_tag" != "$actual_tag" ]; then
+    write_state "$actual_tag" 0 0
+    log "reconciled failover state to routing outbound ${actual_tag}"
+  fi
 }
 
 switch_routing_outbound() {
@@ -166,7 +196,8 @@ switch_routing_outbound() {
   expected_ip="$2"
   probe_urls="$3"
   required_successes="$4"
-  current_tag="$(active_transport)"
+  current_tag="$(routing_active_transport)"
+  [ -n "$current_tag" ] || current_tag="$(active_transport)"
   [ "$current_tag" = "$desired_tag" ] && return 0
   [ -f "$routing_file" ] || return 1
   [ -f "$backup_file" ] || cp -p "$routing_file" "$backup_file"
@@ -188,12 +219,25 @@ switch_routing_outbound() {
   rollback_file="${routing_file}.failover-rollback.$$"
   cp -p "$routing_file" "$rollback_file"
   mv "$tmp_file" "$routing_file"
-  xp2p client service restart >/dev/null 2>&1 || { mv "$rollback_file" "$routing_file"; return 1; }
+  if ! xp2p client service restart >/dev/null 2>&1; then
+    mv "$rollback_file" "$routing_file"
+    reconcile_state_with_routing
+    return 1
+  fi
   sleep 30
   if ! socks_probe "$expected_ip" "$probe_urls" "$required_successes"; then
     mv "$rollback_file" "$routing_file"
     xp2p client service restart >/dev/null 2>&1 || true
     sleep 30
+    reconcile_state_with_routing
+    return 1
+  fi
+  if [ "$(routing_active_transport)" != "$desired_tag" ]; then
+    log "routing outbound drifted after probe; refusing to commit state for ${desired_tag}"
+    mv "$rollback_file" "$routing_file"
+    xp2p client service restart >/dev/null 2>&1 || true
+    sleep 30
+    reconcile_state_with_routing
     return 1
   fi
   rm -f "$rollback_file"
@@ -232,6 +276,7 @@ if ! route_table_has_default; then
   exit 0
 fi
 
+reconcile_state_with_routing
 selection="$(select_transport || true)"
 current_transport="$(active_transport)"
 
