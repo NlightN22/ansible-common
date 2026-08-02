@@ -1,7 +1,7 @@
 ---
 - name: Skip endpoint transport failover checks for non-xp2p WireGuard transports
   ansible.builtin.meta: end_host
-  when: resolved_wireguard_network.effective_transport.type | default('') != 'xp2p'
+  when: resolved_wireguard_network.effective_transport.type | default('') not in ['xp2p', 'xp2p_xray']
 
 - name: Skip endpoint transport failover checks when failover is disabled
   ansible.builtin.meta: end_host
