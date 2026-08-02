@@ -19,7 +19,7 @@ disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disab
 restore_intercept_when_alive='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive | bool | lower }}'
 use_socks_smoke='{{ openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool | lower }}'
 socks_port='{{ openwrt_xp2p_three_x_ui_intercept_failover_socks_port | int }}'
-candidate_tags_json='{{ openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates
+candidate_tags_json='{{ openwrt_transport_failover_candidates
   | selectattr("type", "equalto", "xp2p_xray")
   | map(attribute="outbound_tag")
   | list
@@ -109,7 +109,8 @@ candidate_healthy() {
     transport_enabled "$candidate_tag" || return 1
     active_tag="$(active_transport)"
     if [ "$candidate_tag" != "$active_tag" ] && [ "$independent_probe" != true ]; then
-      switch_routing_outbound "$candidate_tag" "$expected_ip" "$probe_urls" "$required_successes"
+      candidate_status="$(transport_status "$candidate_tag")"
+      [ "$candidate_status" = healthy ] || [ "$candidate_status" = alive ]
       return $?
     fi
     [ "$(transport_status "$candidate_tag")" = healthy ] ||
@@ -262,7 +263,7 @@ enable_intercept_rule() {
 }
 
 select_transport() {
-{% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates %}
+{% for candidate in openwrt_transport_failover_candidates %}
   if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}' '{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}' '{{ candidate.probe_policy.required_successes | default(1) | int }}'; then
     printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}'
     return 0
@@ -277,13 +278,12 @@ if ! route_table_has_default; then
 fi
 
 reconcile_state_with_routing
-selection="$(select_transport || true)"
 current_transport="$(active_transport)"
 
-preferred_tag='{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).outbound_tag | default('') }}'
+preferred_tag='{{ (openwrt_transport_failover_candidates | first).outbound_tag | default('') }}'
 preferred_healthy=false
-if candidate_healthy '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).type }}' \
-    "$preferred_tag" '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{{ (openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates | first).probe_policy.required_successes | default(1) | int }}'; then
+if candidate_healthy '{{ (openwrt_transport_failover_candidates | first).type }}' \
+    "$preferred_tag" '{{ (openwrt_transport_failover_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_transport_failover_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_transport_failover_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{{ (openwrt_transport_failover_candidates | first).probe_policy.required_successes | default(1) | int }}'; then
   preferred_healthy=true
 fi
 preferred_failures="$(state_value preferred_failures 0)"
@@ -313,6 +313,11 @@ else
   write_state "$current_transport" 0 0
 fi
 
+# Candidate selection is deliberately after the anti-flapping gates above.
+# candidate_healthy may inspect a fallback, but only this block may perform
+# switch_routing_outbound, and only after the required failure/recovery quorum.
+selection="$(select_transport || true)"
+
 if [ -z "$selection" ]; then
   [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
   write_state "wan_direct" 0 0
@@ -330,7 +335,7 @@ if [ "$selected_type" = xp2p_xray ]; then
     selected_expected_ip=""
     selected_probe_urls=""
     selected_required_successes=1
-{% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates if candidate.type == 'xp2p_xray' %}
+{% for candidate in openwrt_transport_failover_candidates if candidate.type == 'xp2p_xray' %}
     if [ "$selected_id" = '{{ candidate.id }}' ]; then
       selected_expected_ip='{{ candidate.expected_public_ip }}'
       selected_probe_urls='{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}'

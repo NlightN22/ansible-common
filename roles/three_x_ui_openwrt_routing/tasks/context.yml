@@ -12,6 +12,11 @@
         | first
       }}
 
+- name: Load the canonical OpenWrt router transport model
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/openwrt/{{ inventory_hostname }}.yml"
+    name: openwrt_three_x_ui_router_document
+
 - name: Build 3x-ui OpenWrt routing settings
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_routing_defaults: "{{ openwrt_xp2p_three_x_ui_routing_star.openwrt_routing | default({}) }}"
@@ -21,14 +26,8 @@
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_transport_candidate_inputs: >-
       {{
-        (
-          openwrt_xp2p_three_x_ui_routing_defaults.transport_candidates
-          | default([])
-        )
-        + (
-          openwrt_xp2p_three_x_ui_routing_client_settings.transport_candidates
-          | default([])
-        )
+        [openwrt_three_x_ui_router_document.openwrt_router.transports.preferred]
+        + openwrt_three_x_ui_router_document.openwrt_router.transports.fallbacks
       }}
     openwrt_xp2p_three_x_ui_transport_candidates: []
 
@@ -113,6 +112,8 @@
       {{ openwrt_xp2p_three_x_ui_routing.intercept.failover.required_probe_successes | default(0) }}
     openwrt_xp2p_three_x_ui_transport_candidates: >-
       {{ openwrt_xp2p_three_x_ui_routing.transport_candidates | default([]) }}
+    openwrt_transport_candidates: >-
+      {{ openwrt_xp2p_three_x_ui_routing.transport_candidates | default([]) }}
 
 - name: Build 3x-ui OpenWrt required access proxy route list
   ansible.builtin.set_fact:
@@ -177,6 +178,10 @@
       - openwrt_xp2p_three_x_ui_routing.socks_port | default(0) | int > 0
       - openwrt_xp2p_three_x_ui_routing.socks_egress_checks | default([]) | length > 0
       - openwrt_xp2p_three_x_ui_transport_candidates | length >= 2
+      - >-
+        openwrt_xp2p_three_x_ui_transport_candidate_inputs
+        == [openwrt_three_x_ui_router_document.openwrt_router.transports.preferred]
+          + openwrt_three_x_ui_router_document.openwrt_router.transports.fallbacks
       - openwrt_xp2p_three_x_ui_transport_candidates | map(attribute='id') | list | last == 'wan_direct'
       - >-
         openwrt_xp2p_three_x_ui_transport_candidates
