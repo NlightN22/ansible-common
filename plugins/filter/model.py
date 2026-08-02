@@ -61,6 +61,18 @@ def architecture_deep_merge(base: dict[str, Any], override: dict[str, Any]) -> d
     return _deep_merge(_as_mapping(base, "base"), _as_mapping(override, "override"))
 
 
+def _wireguard_transport_view(transport: dict[str, Any], transport_id: str) -> dict[str, Any]:
+    """Expose the normalized fields consumed by WireGuard endpoint roles."""
+    result = deepcopy(transport)
+    dataplane = result.get("dataplane", {})
+    if isinstance(dataplane, dict):
+        for field in ("interface", "outbound_tag"):
+            if field not in result and dataplane.get(field) is not None:
+                result[field] = deepcopy(dataplane[field])
+    result["transport_id"] = transport_id
+    return result
+
+
 def _blank_model(version: int = MODEL_VERSION) -> dict[str, Any]:
     return {
         "version": int(version),
@@ -306,8 +318,10 @@ def architecture_wireguard_view(
             for key, value in preferred_transport.items()
             if key in {"routed_cidrs", "route"}
         }
-        preferred_transport = _deep_merge(deepcopy(transport_catalog[transport_id]), transport_overrides)
-        preferred_transport["transport_id"] = transport_id
+        preferred_transport = _wireguard_transport_view(
+            _deep_merge(deepcopy(transport_catalog[transport_id]), transport_overrides),
+            transport_id,
+        )
     view["preferred_transport"] = preferred_transport
     view["hub_host"] = view.get("hub_host", view.get("hub"))
     view["hub_public_key"] = hub_member.get("public_key")
@@ -353,8 +367,10 @@ def architecture_wireguard_view(
                     for key, value in effective_transport.items()
                     if key in {"routed_cidrs", "route"}
                 }
-                effective_transport = _deep_merge(deepcopy(transport_catalog[transport_id]), transport_overrides)
-                effective_transport["transport_id"] = transport_id
+                effective_transport = _wireguard_transport_view(
+                    _deep_merge(deepcopy(transport_catalog[transport_id]), transport_overrides),
+                    transport_id,
+                )
             view["effective_transport"] = effective_transport
     return view
 
