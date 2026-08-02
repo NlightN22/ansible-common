@@ -75,6 +75,36 @@
   loop_control:
     label: "{{ item.item }}"
 
+- name: Initialize transport probe route intents
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_probe_routes: []
+
+- name: Build transport probe route intents from transport definitions
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_probe_routes: >-
+      {{
+        openwrt_xp2p_three_x_ui_transport_probe_routes
+        + [{
+            'service': 'transport_probe_' ~ item.0.id ~ '_' ~ item.1.id,
+            'ipv4_cidrs': item.1.destination_ipv4,
+            'outbound_tag': (
+              openwrt_xp2p_three_x_ui_transport_candidates | first
+            ).dataplane.outbound_tag
+          }]
+      }}
+  loop: >-
+    {{ query(
+         'subelements',
+         openwrt_xp2p_three_x_ui_transport_candidates,
+         'probes',
+         {'skip_missing': True}
+       ) }}
+  loop_control:
+    label: "{{ item.0.id }}/{{ item.1.id }}"
+  when:
+    - item.1.type | default('') == 'socks_http'
+    - item.1.destination_ipv4 is defined
+
 - name: Build effective 3x-ui OpenWrt routing settings
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_routing: >-
@@ -158,7 +188,8 @@
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_proxy_routes: >-
       {{
-        openwrt_xp2p_three_x_ui_routing.proxy_routes | default([])
+        openwrt_xp2p_three_x_ui_transport_probe_routes
+        + (openwrt_xp2p_three_x_ui_routing.proxy_routes | default([]))
         + openwrt_xp2p_three_x_ui_required_access_proxy_routes
       }}
     openwrt_xp2p_three_x_ui_xray_direct_cidrs: >-
