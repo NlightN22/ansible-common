@@ -11,7 +11,17 @@
   ansible.builtin.assert:
     that:
       - wireguard_transport_health_result is defined
-      - wireguard_transport_health_result.status == 'healthy'
+      - >-
+        wireguard_transport_health_result.status == 'healthy'
+        or (
+          resolved_wireguard_network.effective_transport.dataplane.independent_egress_probe
+          | default(false) | bool == false
+          and wireguard_transport_health_result.candidates
+          | selectattr('id', 'equalto', resolved_wireguard_network.effective_transport.id | default(''))
+          | selectattr('status', 'equalto', 'unverified')
+          | selectattr('failure_reason', 'equalto', 'shared_socks_probe_not_independent')
+          | list | length == 1
+        )
     fail_msg: >-
       Shared normalized transport health did not confirm the WireGuard endpoint
       transport on {{ inventory_hostname }}.

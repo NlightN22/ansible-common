@@ -31,6 +31,7 @@
     transport_tag='{{ resolved_wireguard_network.effective_transport.outbound_tag }}'
     route_section='{{ resolved_wireguard_network.effective_transport.route.section }}'
     switch_delay_seconds='{{ resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | default(30) | int }}'
+    restore_switch_delay_seconds='{{ resolved_wireguard_network.effective_transport.failover.restore_switch_delay_seconds | default(resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | default(30)) | int }}'
     check_uci_value() {
       key="$1"
       expected="$2"
@@ -135,8 +136,12 @@
     detect_xp2p_status
     evaluate_route_expectation
     if [ "$route_expectation" != ok ] && [ "$xp2p_status" != unknown ]; then
-      echo "ROUTE_EXPECTATION_TRANSITION=waiting_${switch_delay_seconds}s"
-      sleep "$switch_delay_seconds"
+      transition_delay_seconds="$switch_delay_seconds"
+      if [ "$xp2p_status" = alive ] && [ "$route_disabled" = 1 ]; then
+        transition_delay_seconds="$restore_switch_delay_seconds"
+      fi
+      echo "ROUTE_EXPECTATION_TRANSITION=waiting_${transition_delay_seconds}s"
+      sleep "$transition_delay_seconds"
       state_json="$(xp2p client state --json 2>/dev/null || true)"
       state="$(xp2p client state 2>&1)"
       printf '%s\n' "$state"
