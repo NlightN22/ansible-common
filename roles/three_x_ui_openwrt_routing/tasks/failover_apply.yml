@@ -1,0 +1,8 @@
+---
+- name: Prepare generic OpenWrt transport failover context
+  ansible.builtin.include_tasks: context.yml
+
+- name: Install generic OpenWrt transport failover
+  ansible.builtin.include_role:
+    name: ansible_common.core.openwrt_transport_failover
+    tasks_from: main
