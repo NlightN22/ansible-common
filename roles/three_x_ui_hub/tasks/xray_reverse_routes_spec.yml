@@ -55,3 +55,28 @@
     - three_x_ui_hub_star.panel.inbound_tag | default('') | length > 0
     - three_x_ui_hub_star.endpoint.host | default('') | length > 0
   no_log: true
+
+- name: Add direct routes for declared candidate endpoints and probes
+  ansible.builtin.set_fact:
+    three_x_ui_hub_xray_routes: >-
+      {{
+        three_x_ui_hub_xray_routes
+        + [
+          {
+            'state': 'present',
+            'type': 'field',
+            'outboundTag': 'direct',
+            'domain': three_x_ui_hub_star.xray_direct_candidate_routes.domains
+          },
+          {
+            'state': 'present',
+            'type': 'field',
+            'outboundTag': 'direct',
+            'ip': three_x_ui_hub_star.xray_direct_candidate_routes.ipv4_cidrs
+          }
+        ]
+      }}
+  when:
+    - three_x_ui_hub_star.xray_direct_candidate_routes is defined
+    - three_x_ui_hub_star.xray_direct_candidate_routes.domains | default([]) | length > 0
+    - three_x_ui_hub_star.xray_direct_candidate_routes.ipv4_cidrs | default([]) | length > 0
