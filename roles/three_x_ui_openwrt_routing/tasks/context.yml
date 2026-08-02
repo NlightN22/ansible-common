@@ -19,7 +19,22 @@
 
 - name: Build 3x-ui OpenWrt routing settings
   ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_routing_defaults: "{{ openwrt_xp2p_three_x_ui_routing_star.openwrt_routing | default({}) }}"
+    openwrt_xp2p_three_x_ui_router_dataplane: >-
+      {{ openwrt_three_x_ui_router_document.openwrt_router.dataplane | default({}) }}
+
+- name: Build 3x-ui OpenWrt routing settings
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_routing_defaults: >-
+      {{
+        openwrt_xp2p_three_x_ui_routing_star.openwrt_routing | default({})
+        | combine({
+            'remote_config_dir': openwrt_xp2p_three_x_ui_router_dataplane.xp2p.remote_config_dir,
+            'remote_dat_dir': openwrt_xp2p_three_x_ui_router_dataplane.xp2p.remote_dat_dir,
+            'routing_template': openwrt_xp2p_three_x_ui_router_dataplane.xp2p.routing_template,
+            'socks_port': openwrt_xp2p_three_x_ui_router_dataplane.xp2p.socks_port,
+            'intercept': openwrt_xp2p_three_x_ui_router_dataplane.intercept
+          }, recursive=True)
+      }}
     openwrt_xp2p_three_x_ui_routing_client_settings: "{{ openwrt_xp2p_three_x_ui_routing_client.openwrt_routing | default({}) }}"
 
 - name: Initialize 3x-ui OpenWrt transport candidate definitions
@@ -75,6 +90,32 @@
   loop_control:
     label: "{{ item.item }}"
 
+- name: Initialize canonical transport egress check intents
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_egress_checks: []
+
+- name: Build canonical transport egress check intents
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_transport_egress_checks: >-
+      {{
+        openwrt_xp2p_three_x_ui_transport_egress_checks
+        + [{
+            'name': item.id,
+            'url': item.url,
+            'expected_public_ip': item.expected_public_ip
+          }]
+      }}
+  loop: >-
+    {{
+      (
+        openwrt_xp2p_three_x_ui_transport_candidates | first
+      ).probes | default([])
+      | selectattr('type', 'equalto', 'socks_http')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.id }}"
+
 - name: Initialize transport probe route intents
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_transport_probe_routes: []
@@ -125,6 +166,7 @@
             'socks_port': (
               openwrt_xp2p_three_x_ui_transport_candidates | first
             ).dataplane.socks_port | default(0)
+            , 'socks_egress_checks': openwrt_xp2p_three_x_ui_transport_egress_checks
           }, recursive=True)
       }}
 
@@ -137,9 +179,20 @@
       }}
     openwrt_xp2p_three_x_ui_required_access_layers: "{{ openwrt_xp2p_three_x_ui_routing.required_access.layers | default([]) }}"
     openwrt_xp2p_three_x_ui_intercept_failover_socks_probes: >-
-      {{ openwrt_xp2p_three_x_ui_routing.intercept.failover.socks_probes | default([]) }}
+      {{
+        (
+          openwrt_xp2p_three_x_ui_transport_candidates | first
+        ).probes | default([])
+        | selectattr('type', 'equalto', 'socks_http')
+        | list
+      }}
     openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes: >-
-      {{ openwrt_xp2p_three_x_ui_routing.intercept.failover.required_probe_successes | default(0) }}
+      {{
+        (
+          openwrt_xp2p_three_x_ui_transport_candidates | first
+        ).probe_policy.required_successes
+        | default(openwrt_xp2p_three_x_ui_routing.intercept.failover.required_probe_successes | default(0))
+      }}
     openwrt_xp2p_three_x_ui_transport_candidates: >-
       {{ openwrt_xp2p_three_x_ui_routing.transport_candidates | default([]) }}
     openwrt_transport_candidates: >-

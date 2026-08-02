@@ -194,11 +194,17 @@ def _add_three_x_ui_state(
     star: dict[str, Any],
     host: str,
     selected_transport: dict[str, Any] | None = None,
+    router_dataplane: dict[str, Any] | None = None,
 ) -> None:
     client = _three_x_ui_client(star, host)
     if not client:
         return
     routing = _deep_merge(star.get("openwrt_routing", {}) or {}, client.get("openwrt_routing", {}) or {})
+    if router_dataplane:
+        routing = _deep_merge(
+            {"intercept": router_dataplane.get("intercept", {})},
+            routing,
+        )
     if not routing.get("enabled", False):
         return
     intercept = routing.get("intercept", {}) or {}
@@ -249,6 +255,13 @@ def openwrt_route_control_declared_state(
         "excluded_routes": [],
         "excluded_rules": [],
     }
+    router_dataplanes = {
+        fragment.get("openwrt_router", {}).get("id"): fragment.get("openwrt_router", {}).get("dataplane", {})
+        for fragment in _as_list(fragments)
+        if isinstance(fragment, dict)
+        and isinstance(fragment.get("openwrt_router"), dict)
+        and fragment.get("openwrt_router", {}).get("id")
+    }
     for fragment in _as_list(fragments):
         if not isinstance(fragment, dict):
             continue
@@ -262,6 +275,7 @@ def openwrt_route_control_declared_state(
                 _as_mapping(fragment["three_x_ui_star"], "three_x_ui_star"),
                 host,
                 selected_transport,
+                router_dataplanes.get(host),
             )
     state["declared_routes"] = _dedupe(state["declared_routes"], ("target", "interface", "table", "via"))
     state["declared_rules"] = _dedupe(state["declared_rules"], ("priority", "fwmark", "lookup", "from", "to"))
