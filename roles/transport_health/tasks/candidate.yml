@@ -21,8 +21,19 @@
     fetch_socks_url() {
       request_url="$1"
       socks_port="$2"
+      destination_ipv4="$3"
       if command -v curl >/dev/null 2>&1; then
-        curl -fsS --socks5-hostname "127.0.0.1:${socks_port}" --connect-timeout 8 --max-time 30 "$request_url"
+        resolve_args=''
+        if [ -n "$destination_ipv4" ]; then
+          authority="${request_url#*://}"
+          authority="${authority%%/*}"
+          request_host="${authority%%:*}"
+          request_port="${authority##*:}"
+          [ "$request_port" = "$request_host" ] && request_port=443
+          resolve_args="--resolve ${request_host}:${request_port}:${destination_ipv4}"
+        fi
+        # shellcheck disable=SC2086
+        curl -fsS --socks5-hostname "127.0.0.1:${socks_port}" $resolve_args --connect-timeout 8 --max-time 30 "$request_url"
       else
         return 127
       fi
@@ -31,8 +42,19 @@
     fetch_wan_url() {
       request_url="$1"
       wan_interface="$2"
+      destination_ipv4="$3"
       if command -v curl >/dev/null 2>&1; then
-        curl --interface "$wan_interface" -fsS --connect-timeout 8 --max-time 30 "$request_url"
+        resolve_args=''
+        if [ -n "$destination_ipv4" ]; then
+          authority="${request_url#*://}"
+          authority="${authority%%/*}"
+          request_host="${authority%%:*}"
+          request_port="${authority##*:}"
+          [ "$request_port" = "$request_host" ] && request_port=443
+          resolve_args="--resolve ${request_host}:${request_port}:${destination_ipv4}"
+        fi
+        # shellcheck disable=SC2086
+        curl --interface "$wan_interface" -fsS $resolve_args --connect-timeout 8 --max-time 30 "$request_url"
       else
         return 127
       fi
@@ -42,8 +64,9 @@
       probe_kind="$1"
       probe_url="$2"
       expected_ip="$3"
+      destination_ipv4="$4"
       if [ "$probe_kind" = socks_http ]; then
-        probe_output="$(fetch_socks_url "$probe_url" '{{ transport_health_candidate.dataplane.socks_port | default(51180) }}' || true)"
+        probe_output="$(fetch_socks_url "$probe_url" '{{ transport_health_candidate.dataplane.socks_port | default(51180) }}' "$destination_ipv4" || true)"
       else
         probe_output="$(fetch_url "$probe_url" || true)"
       fi
@@ -76,7 +99,7 @@
           probe_successes=0
           probe_count=0
           {% for probe in transport_health_candidate.probes | default([]) %}
-          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}'; then
+          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' '{{ probe.destination_ipv4 | default([]) | first | default('') }}'; then
             probe_successes=$((probe_successes + 1))
           fi
           probe_count=$((probe_count + 1))
@@ -97,7 +120,7 @@
         fi
         {% for probe in transport_health_candidate.probes | default([]) %}
         if [ "$failure_reason" = none ]; then
-          probe_output="$(fetch_wan_url '{{ probe.url | default('') }}' "$wan_interface" || true)"
+          probe_output="$(fetch_wan_url '{{ probe.url | default('') }}' "$wan_interface" '{{ probe.destination_ipv4 | default([]) | first | default('') }}' || true)"
           actual_ip="$(printf '%s\n' "$probe_output" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
           [ -n "$actual_ip" ] || failure_reason="probe_{{ probe.type }}_empty"
           if [ -n '{{ probe.expected_public_ip | default('') }}' ] && [ "$actual_ip" != '{{ probe.expected_public_ip | default('') }}' ]; then

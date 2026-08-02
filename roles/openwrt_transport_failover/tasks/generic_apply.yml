@@ -1,0 +1,70 @@
+---
+- name: Load canonical OpenWrt router transport model
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/openwrt/{{ inventory_hostname }}.yml"
+    name: openwrt_transport_failover_router_document
+
+- name: Initialize generic transport candidate definitions
+  ansible.builtin.set_fact:
+    openwrt_transport_failover_candidate_ids: >-
+      {{
+        [openwrt_transport_failover_router_document.openwrt_router.transports.preferred]
+        + openwrt_transport_failover_router_document.openwrt_router.transports.fallbacks
+      }}
+    openwrt_transport_candidates: []
+
+- name: Load generic transport definitions
+  ansible.builtin.include_vars:
+    file: "{{ inventory_env_dir }}/models/transports/{{ item }}.yml"
+    name: openwrt_transport_failover_transport_document
+  loop: "{{ openwrt_transport_failover_candidate_ids }}"
+  register: openwrt_transport_failover_transport_loads
+
+- name: Normalize generic transport candidates
+  ansible.builtin.set_fact:
+    openwrt_transport_candidates: >-
+      {{
+        openwrt_transport_candidates
+        + [
+            item.ansible_facts.openwrt_transport_failover_transport_document.transport
+            | combine({
+                'outbound_tag': (
+                  item.ansible_facts.openwrt_transport_failover_transport_document.transport.dataplane.outbound_tag
+                  | default('')
+                ),
+                'expected_public_ip': (
+                  item.ansible_facts.openwrt_transport_failover_transport_document.transport.probes
+                  | selectattr('type', 'equalto', 'socks_http')
+                  | map(attribute='expected_public_ip')
+                  | select('defined')
+                  | first
+                  | default('')
+                )
+              }, recursive=True)
+          ]
+      }}
+  loop: "{{ openwrt_transport_failover_transport_loads.results }}"
+
+- name: Build generic transport dataplane routing context
+  ansible.builtin.set_fact:
+    openwrt_xp2p_three_x_ui_routing: >-
+      {{
+        {
+          'enabled': true,
+          'intercept_enabled': openwrt_transport_failover_router_document.openwrt_router.dataplane.lan_intercept,
+          'intercept': openwrt_transport_failover_router_document.openwrt_router.dataplane.intercept,
+          'remote_config_dir': openwrt_transport_failover_router_document.openwrt_router.dataplane.xp2p.remote_config_dir,
+          'remote_dat_dir': openwrt_transport_failover_router_document.openwrt_router.dataplane.xp2p.remote_dat_dir,
+          'routing_template': openwrt_transport_failover_router_document.openwrt_router.dataplane.xp2p.routing_template,
+          'socks_port': openwrt_transport_failover_router_document.openwrt_router.dataplane.xp2p.socks_port,
+          'proxy_outbound_tag': (openwrt_transport_candidates | first).outbound_tag,
+          'final_outbound_tag': (openwrt_transport_candidates | first).outbound_tag
+        }
+      }}
+    openwrt_xp2p_three_x_ui_intercept_failover_socks_probes: >-
+      {{ (openwrt_transport_candidates | first).probes | selectattr('type', 'equalto', 'socks_http') | list }}
+    openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes: >-
+      {{ (openwrt_transport_candidates | first).probe_policy.required_successes }}
+
+- name: Install generic OpenWrt transport failover
+  ansible.builtin.include_tasks: main.yml
