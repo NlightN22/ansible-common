@@ -91,7 +91,7 @@
       exit 1
     fi
     grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' "$routing_file" >/dev/null
-    grep -F '"network": "tcp,udp"' "$routing_file" >/dev/null
+    jq -e '(.rules | type == "array") and all(.rules[]; ((.ruleTag | type) == "string") and (.ruleTag | length > 0)) and any(.rules[]; (.ruleTag == "ansible-three-x-ui-terminal") and (.network == "tcp,udp") and (.outboundTag | type == "string"))' "$routing_file" >/dev/null
     if ! grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' "$routing_file" >/dev/null 2>&1; then
       echo "ROUTING_FINAL_OUTBOUND_MISMATCH expected={{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"
       exit 1

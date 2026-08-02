@@ -19,6 +19,11 @@ disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disab
 restore_intercept_when_alive='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive | bool | lower }}'
 use_socks_smoke='{{ openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool | lower }}'
 socks_port='{{ openwrt_xp2p_three_x_ui_intercept_failover_socks_port | int }}'
+candidate_tags_json='{{ openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates
+  | selectattr("type", "equalto", "xp2p_xray")
+  | map(attribute="outbound_tag")
+  | list
+  | to_json }}'
 
 if ! mkdir "$lock_dir" 2>/dev/null; then
   exit 0
@@ -167,10 +172,18 @@ switch_routing_outbound() {
   [ -f "$backup_file" ] || cp -p "$routing_file" "$backup_file"
   tmp_file="${routing_file}.failover.$$"
   cp -p "$routing_file" "$tmp_file"
-{% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates if candidate.type == 'xp2p_xray' %}
-  sed -i "s/\"outboundTag\": \"{{ candidate.outbound_tag }}\"/\"outboundTag\": \"${desired_tag}\"/g" "$tmp_file"
-{% endfor %}
   if command -v jq >/dev/null 2>&1; then jq -e . "$tmp_file" >/dev/null 2>&1 || { rm -f "$tmp_file"; return 1; }
+    jq --arg desired "$desired_tag" --argjson candidates "$candidate_tags_json" \
+      '.rules |= map(
+        if (.outboundTag? as $tag | $tag != null and ($candidates | index($tag)) != null)
+        then .outboundTag = $desired
+        else .
+        end
+      )' "$tmp_file" > "${tmp_file}.json" || { rm -f "$tmp_file" "${tmp_file}.json"; return 1; }
+    mv "${tmp_file}.json" "$tmp_file"
+  else
+    rm -f "$tmp_file"
+    return 1
   fi
   rollback_file="${routing_file}.failover-rollback.$$"
   cp -p "$routing_file" "$rollback_file"
@@ -270,10 +283,16 @@ selected_tag="${selected_rest#*|}"
 if [ "$selected_type" = xp2p_xray ]; then
   if [ "$current_transport" != "$selected_tag" ]; then
     selected_expected_ip=""
+    selected_probe_urls=""
+    selected_required_successes=1
 {% for candidate in openwrt_xp2p_three_x_ui_intercept_failover_transport_candidates if candidate.type == 'xp2p_xray' %}
-    [ "$selected_id" = '{{ candidate.id }}' ] && selected_expected_ip='{{ candidate.expected_public_ip }}'
+    if [ "$selected_id" = '{{ candidate.id }}' ]; then
+      selected_expected_ip='{{ candidate.expected_public_ip }}'
+      selected_probe_urls='{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}'
+      selected_required_successes={{ candidate.probe_policy.required_successes | default(1) | int }}
+    fi
 {% endfor %}
-    switch_routing_outbound "$selected_tag" "$selected_expected_ip" || {
+    switch_routing_outbound "$selected_tag" "$selected_expected_ip" "$selected_probe_urls" "$selected_required_successes" || {
       log "failed to switch managed Xray outbound to ${selected_tag}; intercept remains unchanged"
       exit 1
     }

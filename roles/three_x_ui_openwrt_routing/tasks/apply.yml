@@ -82,7 +82,18 @@
   delegate_to: localhost
   run_once: true
 
-- name: Validate rendered 3x-ui OpenWrt Xray routing JSON and rule order
+- name: Validate rendered 3x-ui OpenWrt Xray routing rule tags and terminal rule
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - '(.rules | type == "array") and all(.rules[]; ((.ruleTag | type) == "string") and (.ruleTag | length > 0)) and any(.rules[]; (.ruleTag == "ansible-three-x-ui-terminal") and (.network == "tcp,udp") and (.outboundTag | type == "string"))'
+      - "{{ openwrt_xp2p_three_x_ui_routing_cache_dir }}/{{ openwrt_xp2p_three_x_ui_routing_star.id }}/routing.rules.after-xp2p-managed.json"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+
+- name: Validate rendered 3x-ui OpenWrt Xray routing order
   ansible.builtin.command:
     argv:
       - jq
