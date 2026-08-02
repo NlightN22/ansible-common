@@ -29,7 +29,7 @@
       - openwrt_wireguard_failover_endpoint_host | length > 0
       - openwrt_wireguard_failover_endpoint_port | int > 0
       - openwrt_wireguard_failover_endpoint_fallback_enabled | bool
-      - openwrt_wireguard_failover_transport_type == 'xp2p'
+      - openwrt_wireguard_failover_transport_type in ['xp2p', 'xp2p_xray']
       - openwrt_wireguard_failover_transport_interface | length > 0
       - openwrt_wireguard_failover_transport_tag | length > 0
       - openwrt_wireguard_failover_route_section | length > 0

@@ -32,12 +32,12 @@
 - name: Validate WireGuard OpenWrt transport settings
   ansible.builtin.assert:
     that:
-      - resolved_wireguard_network.effective_transport.type | default('public') in ['public', 'xp2p']
-      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.star is defined
-      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.interface is defined
-      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.outbound_tag is defined
-      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.routed_cidrs | default([]) | length > 0
-      - resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p' or resolved_wireguard_network.effective_transport.route.section is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') in ['public', 'xp2p', 'xp2p_xray']
+      - resolved_wireguard_network.effective_transport.type | default('public') not in ['xp2p', 'xp2p_xray'] or resolved_wireguard_network.effective_transport.star is defined or resolved_wireguard_network.effective_transport.endpoint is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') not in ['xp2p', 'xp2p_xray'] or resolved_wireguard_network.effective_transport.interface is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') not in ['xp2p', 'xp2p_xray'] or resolved_wireguard_network.effective_transport.outbound_tag is defined
+      - resolved_wireguard_network.effective_transport.type | default('public') not in ['xp2p', 'xp2p_xray'] or resolved_wireguard_network.effective_transport.routed_cidrs | default([]) | length > 0
+      - resolved_wireguard_network.effective_transport.type | default('public') not in ['xp2p', 'xp2p_xray'] or resolved_wireguard_network.effective_transport.route.section is defined
       - not (resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool) or resolved_wireguard_network.effective_transport.failover.switch_delay_seconds | int >= 30
     fail_msg: "WireGuard OpenWrt transport model is incomplete for {{ inventory_hostname }}."
 
@@ -263,7 +263,7 @@
     that:
       - >-
         resolved_wireguard_network.is_hub | bool
-        or resolved_wireguard_network.effective_transport.type | default('public') != 'xp2p'
+        or resolved_wireguard_network.effective_transport.type | default('public') not in ['xp2p', 'xp2p_xray']
         or resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool
         or 'dev ' ~ resolved_wireguard_network.effective_transport.interface in wireguard_openwrt_verify.stdout
       - resolved_wireguard_network.is_hub | bool or 'dev ' ~ resolved_wireguard_network.interface_name in wireguard_openwrt_verify.stdout

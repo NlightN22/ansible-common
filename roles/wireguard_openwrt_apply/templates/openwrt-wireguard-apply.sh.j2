@@ -10,7 +10,7 @@ hub_public_key='{{ wireguard_hub_public_key }}'
 endpoint_host='{{ openwrt_wireguard_apply_site.endpoint.host }}'
 endpoint_port='{{ openwrt_wireguard_apply_site.endpoint.port }}'
 {% set endpoint_route_section_defined = openwrt_wireguard_apply_transport.route is defined and openwrt_wireguard_apply_transport.route.section is defined %}
-{% set endpoint_route_managed = openwrt_wireguard_apply_transport.type | default('public') == 'xp2p' and openwrt_wireguard_apply_transport.interface is defined and endpoint_route_section_defined %}
+{% set endpoint_route_managed = openwrt_wireguard_apply_transport.type | default('public') in ['xp2p', 'xp2p_xray'] and openwrt_wireguard_apply_transport.interface is defined and endpoint_route_section_defined %}
 {% if endpoint_route_section_defined %}
 endpoint_route_section='{{ openwrt_wireguard_apply_transport.route.section }}'
 {% endif %}
