@@ -8,6 +8,22 @@
   when: wireguard_member_platform == 'openwrt'
 
 - name: Run OpenWrt WireGuard endpoint failover apply
+  ansible.builtin.assert:
+    that:
+      - wireguard_transport_health_result is defined
+      - wireguard_transport_health_result.status == 'healthy'
+    fail_msg: >-
+      Shared normalized transport health did not confirm the WireGuard endpoint
+      transport on {{ inventory_hostname }}.
+  when:
+    - wireguard_apply_endpoint_failover_enabled | bool
+    - wireguard_member_platform == 'openwrt'
+    - resolved_wireguard_network.current_member.role | default('spoke') != 'hub'
+    - resolved_wireguard_network.endpoint.fallback.enabled | default(false) | bool
+    - resolved_wireguard_network.effective_transport.type | default('public') == 'xp2p'
+    - resolved_wireguard_network.effective_transport.failover.enabled | default(false) | bool
+
+- name: Run OpenWrt WireGuard endpoint failover apply
   ansible.builtin.include_role:
     name: ansible_common.core.wireguard_openwrt_endpoint_failover_apply
   when:

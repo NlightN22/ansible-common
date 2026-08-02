@@ -168,6 +168,15 @@ def architecture_model_from_fragments(fragments: Any, version: int = MODEL_VERSI
             _add_star_network(model, _as_mapping(fragment["xp2p_star"], "xp2p_star"), "xp2p")
         if "three_x_ui_star" in fragment:
             _add_star_network(model, _as_mapping(fragment["three_x_ui_star"], "three_x_ui_star"), "xray_overlay")
+        if "transport" in fragment:
+            transport = _as_mapping(fragment["transport"], "transport")
+            transport_id = str(transport.get("id") or "")
+            if not transport_id:
+                raise AnsibleFilterError("transport.id is required")
+            model["transports"][transport_id] = _deep_merge(
+                model["transports"].get(transport_id, {}),
+                transport,
+            )
         if "ad_replication_topology" in fragment:
             topology = _as_mapping(fragment["ad_replication_topology"], "ad_replication_topology")
             topology_id = str(topology.get("id") or "domain_controller_topology")
@@ -284,7 +293,22 @@ def architecture_wireguard_view(
         endpoint["port"] = view.get("listen_port", source.get("listen_port"))
     view["endpoint"] = endpoint
     view["network_cidr"] = view.get("network_cidr", source.get("network_cidr"))
-    view["preferred_transport"] = view.get("preferred_transport", source.get("preferred_transport", {}))
+    preferred_transport = view.get("preferred_transport", source.get("preferred_transport", {}))
+    if isinstance(preferred_transport, dict) and preferred_transport.get("transport_id"):
+        transport_id = preferred_transport["transport_id"]
+        transport_catalog = model.get("transports", {})
+        if transport_id not in transport_catalog:
+            raise AnsibleFilterError(
+                f"WireGuard network {network_id!r} references unknown transport {transport_id!r}"
+            )
+        transport_overrides = {
+            key: value
+            for key, value in preferred_transport.items()
+            if key in {"routed_cidrs", "route"}
+        }
+        preferred_transport = _deep_merge(deepcopy(transport_catalog[transport_id]), transport_overrides)
+        preferred_transport["transport_id"] = transport_id
+    view["preferred_transport"] = preferred_transport
     view["hub_host"] = view.get("hub_host", view.get("hub"))
     view["hub_public_key"] = hub_member.get("public_key")
     view["post_up"] = list(hub_member.get("post_up", []) or [])
@@ -313,10 +337,25 @@ def architecture_wireguard_view(
         view["is_hub"] = architecture_is_hub(view, node_id)
         if member is not None:
             view["current_host"] = member.get("host", node_id)
-            view["effective_transport"] = member.get(
+            effective_transport = member.get(
                 "preferred_transport",
                 view.get("preferred_transport", source.get("preferred_transport", {})),
             )
+            if isinstance(effective_transport, dict) and effective_transport.get("transport_id"):
+                transport_id = effective_transport["transport_id"]
+                transport_catalog = model.get("transports", {})
+                if transport_id not in transport_catalog:
+                    raise AnsibleFilterError(
+                        f"WireGuard network {network_id!r} references unknown transport {transport_id!r}"
+                    )
+                transport_overrides = {
+                    key: value
+                    for key, value in effective_transport.items()
+                    if key in {"routed_cidrs", "route"}
+                }
+                effective_transport = _deep_merge(deepcopy(transport_catalog[transport_id]), transport_overrides)
+                effective_transport["transport_id"] = transport_id
+            view["effective_transport"] = effective_transport
     return view
 
 

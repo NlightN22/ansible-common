@@ -83,7 +83,7 @@
     }
 
     case "$transport_type" in
-      xp2p_xray)
+      xp2p|xp2p_xray)
         interface='{{ transport_health_candidate.dataplane.interface | default('') }}'
         outbound_tag='{{ transport_health_candidate.dataplane.outbound_tag | default('') }}'
         active_outbound_tag='{{ transport_health_active_outbound_tag | default('') }}'
