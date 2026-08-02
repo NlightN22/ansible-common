@@ -189,11 +189,11 @@ switch_routing_outbound() {
   cp -p "$routing_file" "$rollback_file"
   mv "$tmp_file" "$routing_file"
   xp2p client service restart >/dev/null 2>&1 || { mv "$rollback_file" "$routing_file"; return 1; }
-  sleep 15
+  sleep 30
   if ! socks_probe "$expected_ip" "$probe_urls" "$required_successes"; then
     mv "$rollback_file" "$routing_file"
     xp2p client service restart >/dev/null 2>&1 || true
-    sleep 15
+    sleep 30
     return 1
   fi
   rm -f "$rollback_file"
