@@ -128,11 +128,14 @@ def _endpoint_intent_from_xp2p(network_id: str, network: dict[str, Any], node_id
     source = network.get("source", {})
     if not isinstance(source, dict):
         source = {}
-    host = network.get("endpoint_host") or source.get("endpoint_host") or network.get("server") or network.get("hub")
+    host_name = network.get("endpoint_name") or source.get("endpoint_name") or network.get("server") or network.get("hub")
+    address = network.get("endpoint_address") or source.get("endpoint_address") or network.get("endpoint_host") or source.get("endpoint_host") or host_name
+    host = address
     tag = network.get("outbound_tag") or source.get("outbound_tag") or _endpoint_tag(network.get("endpoint_name") or host)
     return {
         "tag": tag,
         "host": host,
+        "address": address,
         "port": network.get("endpoint_port") or source.get("endpoint_port"),
         "server_name": network.get("server_name") or source.get("server_name") or network.get("endpoint_name") or host,
         "sni": network.get("server_name") or source.get("server_name") or network.get("endpoint_name") or host,
@@ -156,13 +159,16 @@ def _endpoint_intent_from_xray_overlay(network_id: str, network: dict[str, Any],
     panel = network.get("panel") if isinstance(network.get("panel"), dict) else source.get("panel", {})
     if not isinstance(panel, dict):
         panel = {}
-    host = endpoint.get("host")
+    host_name = endpoint.get("host")
+    address = endpoint.get("address") or host_name
+    host = address
     return {
-        "tag": network.get("outbound_tag") or source.get("outbound_tag") or _endpoint_tag(host),
+        "tag": network.get("outbound_tag") or source.get("outbound_tag") or _endpoint_tag(host_name),
         "host": host,
+        "address": address,
         "port": endpoint.get("port"),
-        "server_name": endpoint.get("server_name") or endpoint.get("sni") or host,
-        "sni": endpoint.get("sni") or endpoint.get("server_name") or host,
+        "server_name": endpoint.get("server_name") or endpoint.get("sni") or host_name,
+        "sni": endpoint.get("sni") or endpoint.get("server_name") or host_name,
         "user": client.get("user") or client.get("email") or client.get("id") or client.get("host"),
         "protocol": panel.get("protocol") or network.get("protocol") or source.get("protocol") or "trojan",
         "source": f"three_x_ui:{network_id}",
