@@ -90,6 +90,9 @@
             'proxy_route_outbound_tag': (
               openwrt_xp2p_three_x_ui_transport_candidates | first
             ).dataplane.outbound_tag | default(''),
+            'final_outbound_tag': (
+              openwrt_xp2p_three_x_ui_transport_candidates | first
+            ).dataplane.outbound_tag | default(''),
             'socks_port': (
               openwrt_xp2p_three_x_ui_transport_candidates | first
             ).dataplane.socks_port | default(0)
@@ -166,6 +169,7 @@
       - inventory_hostname in openwrt_xp2p_three_x_ui_routing_star.clients | map(attribute='host') | list
       - openwrt_xp2p_three_x_ui_routing.enabled | default(false) | bool
       - openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag | default('') | length > 0
+      - openwrt_xp2p_three_x_ui_routing.final_outbound_tag == openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag
       - openwrt_xp2p_three_x_ui_routing.routing_template | default('') | length > 0
       - openwrt_xp2p_three_x_ui_routing.remote_config_dir | default('') | length > 0
       - openwrt_xp2p_three_x_ui_routing.remote_dat_dir | default('') | length > 0

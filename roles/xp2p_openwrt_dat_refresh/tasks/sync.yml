@@ -75,11 +75,14 @@
   changed_when: true
   delegate_to: localhost
   when: >-
-    xp2p_dat_refresh_force | bool
-    or (xp2p_dat_refresh_remote_parts | length) < 2
-    or (xp2p_dat_refresh_remote_parts[0] | int) <= 0
-    or (xp2p_dat_refresh_remote_parts[0] | int) != (xp2p_dat_refresh_local_stat.size | int)
-    or xp2p_dat_refresh_remote_parts[1] != xp2p_dat_refresh_local_stat.checksum
+    not (xp2p_dat_refresh_skip_sync | default(false) | bool)
+    and (
+      xp2p_dat_refresh_force | bool
+      or (xp2p_dat_refresh_remote_parts | length) < 2
+      or (xp2p_dat_refresh_remote_parts[0] | int) <= 0
+      or (xp2p_dat_refresh_remote_parts[0] | int) != (xp2p_dat_refresh_local_stat.size | int)
+      or xp2p_dat_refresh_remote_parts[1] != xp2p_dat_refresh_local_stat.checksum
+    )
 
 - name: Validate remote XP2P dat files
   ansible.builtin.raw: "test -s '{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}'"
