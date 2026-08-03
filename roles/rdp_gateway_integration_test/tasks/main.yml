@@ -55,6 +55,7 @@
           rdp_gateway_integration_credentials_option,
           rdp_gateway_integration_auth_only_option,
           '/cert:ignore',
+          '/tls-seclevel:' ~ (rdp_gateway_integration_tls_security_level | string),
           '/timeout:' ~ (rdp_gateway_integration_timeout_ms | string),
           '/log-level:ERROR'] }}
     stdin: "{{ item.password }}"

@@ -9,4 +9,8 @@ rdp_gateway_integration_runner_args:
 rdp_gateway_integration_timeout_ms: 15000
 rdp_gateway_integration_auth_only_option: "+auth-only"
 rdp_gateway_integration_credentials_option: "/from-stdin:force"
+# Some Windows RDP Session Hosts still expose legacy self-signed/SHA-1
+# certificates. FreeRDP otherwise rejects them before authentication even when
+# certificate verification is ignored.
+rdp_gateway_integration_tls_security_level: 0
 rdp_gateway_integration_tests: []
