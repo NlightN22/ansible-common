@@ -71,6 +71,35 @@ def _member_allowed_ips(member: dict[str, Any], inherited_allowed_ips: list[str]
     return [value for value in dict.fromkeys(values) if isinstance(value, str) and value]
 
 
+def _resolve_wireguard_transport(
+    preferred_transport: dict[str, Any],
+    transport_catalog: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Resolve a WireGuard transport reference before building route intents."""
+    transport = preferred_transport or {}
+    transport_id = transport.get("transport_id")
+    if not transport_id or not isinstance(transport_catalog, dict):
+        return transport
+
+    transport_definition = transport_catalog.get(transport_id)
+    if not isinstance(transport_definition, dict):
+        return transport
+
+    overrides = {
+        key: value
+        for key, value in transport.items()
+        if key in {"routed_cidrs", "route"}
+    }
+    resolved = _deep_merge(transport_definition, overrides)
+    dataplane = resolved.get("dataplane", {})
+    if isinstance(dataplane, dict):
+        for field in ("interface", "outbound_tag"):
+            if field not in resolved and dataplane.get(field) is not None:
+                resolved[field] = deepcopy(dataplane[field])
+    resolved["transport_id"] = transport_id
+    return resolved
+
+
 def _hub_allowed_ips(site: dict[str, Any]) -> list[str]:
     hub = site.get("hub")
     if isinstance(hub, dict) and hub.get("allowed_ips") is not None:
@@ -78,7 +107,12 @@ def _hub_allowed_ips(site: dict[str, Any]) -> list[str]:
     return []
 
 
-def _add_wireguard_state(state: dict[str, list[dict[str, Any]]], site: dict[str, Any], host: str) -> None:
+def _add_wireguard_state(
+    state: dict[str, list[dict[str, Any]]],
+    site: dict[str, Any],
+    host: str,
+    transport_catalog: dict[str, dict[str, Any]] | None = None,
+) -> None:
     member = _host_member(site, host)
     if not member or not member.get("active", True) or member.get("platform", "openwrt") != "openwrt":
         return
@@ -99,6 +133,7 @@ def _add_wireguard_state(state: dict[str, list[dict[str, Any]]], site: dict[str,
             state["declared_routes"].append({"target": target, "interface": interface, "source": source})
 
     transport = member.get("preferred_transport", site.get("preferred_transport", {})) or {}
+    transport = _resolve_wireguard_transport(transport, transport_catalog)
     route = transport.get("route", {}) if isinstance(transport, dict) else {}
     if isinstance(route, dict) and transport.get("interface") and site.get("endpoint", {}).get("host"):
         endpoint_route = {
@@ -262,11 +297,23 @@ def openwrt_route_control_declared_state(
         and isinstance(fragment.get("openwrt_router"), dict)
         and fragment.get("openwrt_router", {}).get("id")
     }
+    transport_catalog = {
+        fragment.get("transport", {}).get("id"): fragment.get("transport", {})
+        for fragment in _as_list(fragments)
+        if isinstance(fragment, dict)
+        and isinstance(fragment.get("transport"), dict)
+        and fragment.get("transport", {}).get("id")
+    }
     for fragment in _as_list(fragments):
         if not isinstance(fragment, dict):
             continue
         if isinstance(fragment.get("wireguard_site"), dict):
-            _add_wireguard_state(state, _as_mapping(fragment["wireguard_site"], "wireguard_site"), host)
+            _add_wireguard_state(
+                state,
+                _as_mapping(fragment["wireguard_site"], "wireguard_site"),
+                host,
+                transport_catalog,
+            )
         if isinstance(fragment.get("xp2p_star"), dict):
             _add_xp2p_state(state, _as_mapping(fragment["xp2p_star"], "xp2p_star"), host)
         if isinstance(fragment.get("three_x_ui_star"), dict):
