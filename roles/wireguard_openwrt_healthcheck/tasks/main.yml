@@ -61,6 +61,14 @@
     echo "### now ${now}"
     echo '### interface'
     ip link show dev {{ resolved_wireguard_network.interface_name }} || rc=1
+    expected_mtu="{{ resolved_wireguard_network.mtu | default('') }}"
+    if [ -n "$expected_mtu" ]; then
+      actual_mtu="$(ip -o link show dev {{ resolved_wireguard_network.interface_name }} 2>/dev/null | sed -n 's/.* mtu \([0-9][0-9]*\).*/\1/p')"
+      if [ "$actual_mtu" != "$expected_mtu" ]; then
+        echo "MTU_MISMATCH interface={{ resolved_wireguard_network.interface_name }} expected=${expected_mtu} actual=${actual_mtu:-<missing>}"
+        rc=1
+      fi
+    fi
     echo '### dump'
     wg show {{ resolved_wireguard_network.interface_name }} dump || rc=1
     echo '### endpoint route'
