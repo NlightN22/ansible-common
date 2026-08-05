@@ -165,13 +165,19 @@ candidate_healthy() {
 }
 
 active_transport() {
-  routing_tag="$(routing_active_transport)"
+  routing_tag="$(routing_active_xray_outbound)"
   if [ -n "$routing_tag" ]; then
     printf '%s\n' "$routing_tag"
     return 0
   fi
   if [ -f "$state_file" ]; then
-    sed -n 's/^active_transport=//p' "$state_file" | head -n 1
+    routing_tag="$(sed -n 's/^active_xray_outbound=//p' "$state_file" | head -n 1)"
+    [ -n "$routing_tag" ] && printf '%s\n' "$routing_tag" && return 0
+    routing_tag="$(sed -n 's/^active_transport=//p' "$state_file" | head -n 1)"
+    case "$routing_tag" in
+      ''|wan_direct) ;;
+      *) printf '%s\n' "$routing_tag" ;;
+    esac
   fi
 }
 
@@ -191,36 +197,50 @@ write_state() {
   state_successes="$3"
   state_tmp="${state_file}.tmp.$$"
   mkdir -p "$(dirname "$state_file")"
-  routing_tag="$(routing_active_transport)"
+  routing_tag="$(routing_active_xray_outbound)"
+  fallback_tag="$(routing_wan_fallback)"
   {
-    # Xray active transport is owned by the terminal routing rule. Do not
-    # persist a second candidate value that an external XP2P watcher can
-    # invalidate between two failover cycles.
-    if [ -z "$routing_tag" ]; then
-      printf 'active_transport=%s\n' "$state_active"
-    fi
+    printf 'active_xray_outbound=%s\n' "${routing_tag:-$state_active}"
+    printf 'wan_fallback=%s\n' "$fallback_tag"
+    # Keep the legacy key for readers that have not migrated yet, but never
+    # encode the terminal WAN fallback as an active Xray transport.
+    case "${routing_tag:-$state_active}" in
+      ''|wan_direct) printf 'active_transport=\n' ;;
+      *) printf 'active_transport=%s\n' "${routing_tag:-$state_active}" ;;
+    esac
     printf 'preferred_failures=%s\n' "$state_failures"
     printf 'preferred_successes=%s\n' "$state_successes"
   } > "$state_tmp"
   mv "$state_tmp" "$state_file"
 }
 
-routing_active_transport() {
+routing_active_xray_outbound() {
   [ -f "$routing_file" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
   jq -r --argjson candidates "$candidate_tags_json" '
-    .rules[-1].outboundTag as $tag |
-    if ($tag != null and ($candidates | index($tag)) != null) then $tag else "" end
+    [.rules[]?.outboundTag? as $tag | select($tag != null and ($candidates | index($tag)) != null) | $tag]
+    | if length > 0 then .[0] else "" end
   ' "$routing_file" 2>/dev/null || true
 }
 
+routing_wan_fallback() {
+  [ -f "$routing_file" ] || { printf '%s\n' unknown; return 0; }
+  command -v jq >/dev/null 2>&1 || { printf '%s\n' unknown; return 0; }
+  jq -r '
+    .rules[-1].outboundTag as $tag |
+    if $tag == "direct" then "wan_direct" else ($tag // "unknown") end
+  ' "$routing_file" 2>/dev/null || printf '%s\n' unknown
+}
+
 reconcile_state_with_routing() {
-  actual_tag="$(routing_active_transport)"
-  [ -n "$actual_tag" ] || return 0
+  actual_tag="$(routing_active_xray_outbound)"
   recorded_tag="$(active_transport)"
-  if [ "$recorded_tag" != "$actual_tag" ]; then
+  if [ -n "$actual_tag" ] && [ "$recorded_tag" != "$actual_tag" ]; then
     write_state "$actual_tag" 0 0
     log "reconciled failover state to routing outbound ${actual_tag}"
+  elif [ -z "$actual_tag" ] && [ -n "$recorded_tag" ]; then
+    write_state "" 0 0
+    log "cleared stale active Xray outbound state; WAN fallback is $(routing_wan_fallback)"
   fi
 }
 
@@ -230,7 +250,7 @@ switch_routing_outbound() {
   probe_urls="$3"
   probe_destinations="$4"
   required_successes="$5"
-  current_tag="$(routing_active_transport)"
+  current_tag="$(routing_active_xray_outbound)"
   [ -n "$current_tag" ] || current_tag="$(active_transport)"
   [ "$current_tag" = "$desired_tag" ] && return 0
   [ -f "$routing_file" ] || return 1
@@ -254,7 +274,7 @@ switch_routing_outbound() {
     reconcile_state_with_routing
     return 1
   fi
-  if [ "$(routing_active_transport)" != "$desired_tag" ]; then
+  if [ "$(routing_active_xray_outbound)" != "$desired_tag" ]; then
     log "routing outbound drifted after probe; refusing to commit state for ${desired_tag}"
     mv "$rollback_file" "$routing_file"
     xp2p client service restart >/dev/null 2>&1 || true
@@ -337,7 +357,7 @@ selection="$(select_transport || true)"
 
 if [ -z "$selection" ]; then
   [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
-  write_state "wan_direct" 0 0
+  write_state "" 0 0
   log "no healthy transport candidate; WAN direct fallback is active"
   exit 0
 fi
@@ -382,6 +402,6 @@ elif [ "$selected_type" = wireguard ]; then
   [ "$restore_intercept_when_alive" = true ] && enable_intercept_rule
 else
   [ "$disable_intercept_when_dead" = true ] && disable_intercept_rule
-  write_state "wan_direct" 0 0
+  write_state "" 0 0
   log "transport check: no tunnel candidate selected; WAN direct fallback remains active"
 fi

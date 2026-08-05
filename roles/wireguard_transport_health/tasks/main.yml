@@ -1,7 +1,7 @@
 ---
-- name: Discover active Xray outbound for WireGuard transport health
+- name: Discover active Xray outbound from proxy routing rules for WireGuard transport health
   ansible.builtin.raw: >-
-    jq -r --argjson candidates '{{ wireguard_transport_health_candidates | selectattr("type", "in", ["xp2p", "xp2p_xray"]) | map(attribute="dataplane.outbound_tag") | list | to_json }}' '.rules[-1].outboundTag as $tag | if ($tag != null and ($candidates | index($tag)) != null) then $tag else "" end' /etc/xp2p/config-client/routing.rules.after-xp2p-managed.json
+    jq -r --argjson candidates '{{ wireguard_transport_health_candidates | selectattr("type", "in", ["xp2p", "xp2p_xray"]) | map(attribute="dataplane.outbound_tag") | list | to_json }}' '[.rules[]?.outboundTag? as $tag | select($tag != null and ($candidates | index($tag)) != null) | $tag] | if length > 0 then .[0] else "" end' /etc/xp2p/config-client/routing.rules.after-xp2p-managed.json
   register: wireguard_transport_health_active_outbound
   changed_when: false
   failed_when: false
