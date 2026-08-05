@@ -47,6 +47,7 @@
     openwrt_xp2p_three_x_ui_intercept_failover_routing_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
     openwrt_xp2p_three_x_ui_intercept_failover_state_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state"
     openwrt_xp2p_three_x_ui_intercept_failover_backup_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json.failover-base"
+    openwrt_route_control_runtime_helper_path: /usr/libexec/openwrt-route-control-runtime
     openwrt_transport_failover_candidates: "{{ openwrt_transport_candidates }}"
 
 - name: Validate 3x-ui OpenWrt LAN intercept failover model

@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+rule_section='{{ openwrt_route_control_runtime_rule_section }}'
+route_section='{{ openwrt_route_control_runtime_route_section }}'
+
+usage() {
+  printf '%s\n' "usage: $0 set-intercept <enabled|disabled> | set-route-interface <interface> | replace-xray-outbound <routing-file> <tag> <candidate-tags-json>" >&2
+  exit 2
+}
+
+[ "$#" -ge 2 ] || usage
+command="$1"
+
+case "$command" in
+  set-intercept)
+    case "$2" in
+      enabled)
+        uci -q delete "network.${rule_section}.disabled" || true
+        ;;
+      disabled)
+        uci set "network.${rule_section}.disabled=1"
+        ;;
+      *) usage ;;
+    esac
+    uci commit network
+    /etc/init.d/network reload
+    ;;
+  set-route-interface)
+    [ -n "$2" ] || usage
+    uci set "network.${route_section}.interface=$2"
+    uci commit network
+    /etc/init.d/network reload
+    ;;
+  replace-xray-outbound)
+    [ "$#" -eq 4 ] || usage
+    routing_file="$2"
+    desired_tag="$3"
+    candidate_tags_json="$4"
+    [ -f "$routing_file" ] || exit 1
+    command -v jq >/dev/null 2>&1 || exit 1
+    tmp_file="${routing_file}.route-control.$$"
+    jq -e . "$routing_file" >/dev/null
+    jq --arg desired "$desired_tag" --argjson candidates "$candidate_tags_json" \
+      '.rules |= map(
+        if (.outboundTag? as $tag | $tag != null and ($candidates | index($tag)) != null)
+        then .outboundTag = $desired
+        else .
+        end
+      )' "$routing_file" > "$tmp_file"
+    chmod --reference="$routing_file" "$tmp_file" 2>/dev/null || true
+    mv "$tmp_file" "$routing_file"
+    ;;
+  *) usage ;;
+esac

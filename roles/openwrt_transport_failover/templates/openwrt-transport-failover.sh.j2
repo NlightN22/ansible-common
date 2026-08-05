@@ -12,6 +12,7 @@ wan_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_wan_interface }}'
 routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
 state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
 backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
+route_control_helper='{{ openwrt_route_control_runtime_helper_path }}'
 lock_dir="${state_file}.lock"
 dead_after_failures='{{ openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures | int }}'
 restore_after_successes='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes | int }}'
@@ -96,6 +97,7 @@ wan_probe() {
   probe_urls="$1"
   probe_destinations="$2"
   required_successes="$3"
+  expected_country="$4"
   [ "$use_socks_smoke" = "true" ] || return 0
   probe_successes=0
   probe_index=1
@@ -109,8 +111,13 @@ wan_probe() {
     resolve_args=''
     [ -n "$destination_ipv4" ] && resolve_args="--resolve ${probe_host}:${probe_port}:${destination_ipv4}"
     # shellcheck disable=SC2086
-    curl --interface "$wan_interface" -fsS $resolve_args --connect-timeout 3 --max-time 8 \
-      "$probe_url" >/dev/null 2>&1 && probe_successes=$((probe_successes + 1))
+    probe_output="$(curl --interface "$wan_interface" -fsS $resolve_args --connect-timeout 3 --max-time 8 \
+      "$probe_url" 2>/dev/null || true)"
+    if [ -n "$probe_output" ] && {
+      [ -z "$expected_country" ] || printf '%s\n' "$probe_output" | grep -Eiq '"country"[[:space:]]*:[[:space:]]*"?'"$expected_country"'"?|country[=:][[:space:]]*'"$expected_country";
+    }; then
+      probe_successes=$((probe_successes + 1))
+    fi
     probe_index=$((probe_index + 1))
   done
   [ "$probe_successes" -ge "$required_successes" ]
@@ -124,9 +131,11 @@ candidate_healthy() {
   probe_urls="$5"
   probe_destinations="$6"
   required_successes="$7"
+  expected_country="$8"
+  peer_public_key="$9"
   if [ "$candidate_type" = wan_direct ]; then
     [ -n "$wan_interface" ] || return 1
-    wan_probe "$probe_urls" "$probe_destinations" "$required_successes"
+    wan_probe "$probe_urls" "$probe_destinations" "$required_successes" "$expected_country"
     return $?
   fi
   if [ "$candidate_type" = xp2p_xray ]; then
@@ -149,10 +158,10 @@ candidate_healthy() {
     ip link show "$candidate_interface" >/dev/null 2>&1 || return 1
     ip route get "$candidate_endpoint" >/dev/null 2>&1 || return 1
     command -v wg >/dev/null 2>&1 || return 1
+    [ -n "$peer_public_key" ] || return 1
     now="$(date +%s)"
-    for handshake in $(wg show "$candidate_interface" latest-handshakes 2>/dev/null | awk '{print $2}' || true); do
-      [ "$handshake" -gt 0 ] && [ "$((now - handshake))" -le 180 ] && return 0
-    done
+    handshake="$(wg show "$candidate_interface" latest-handshakes "$peer_public_key" 2>/dev/null | awk 'NF {print $2; exit}' || true)"
+    [ -n "$handshake" ] && [ "$handshake" -gt 0 ] && [ "$((now - handshake))" -le 180 ] && return 0
   fi
   return 1
 }
@@ -228,24 +237,12 @@ switch_routing_outbound() {
   [ "$current_tag" = "$desired_tag" ] && return 0
   [ -f "$routing_file" ] || return 1
   [ -f "$backup_file" ] || cp -p "$routing_file" "$backup_file"
-  tmp_file="${routing_file}.failover.$$"
-  cp -p "$routing_file" "$tmp_file"
-  if command -v jq >/dev/null 2>&1; then jq -e . "$tmp_file" >/dev/null 2>&1 || { rm -f "$tmp_file"; return 1; }
-    jq --arg desired "$desired_tag" --argjson candidates "$candidate_tags_json" \
-      '.rules |= map(
-        if (.outboundTag? as $tag | $tag != null and ($candidates | index($tag)) != null)
-        then .outboundTag = $desired
-        else .
-        end
-      )' "$tmp_file" > "${tmp_file}.json" || { rm -f "$tmp_file" "${tmp_file}.json"; return 1; }
-    mv "${tmp_file}.json" "$tmp_file"
-  else
-    rm -f "$tmp_file"
-    return 1
-  fi
   rollback_file="${routing_file}.failover-rollback.$$"
   cp -p "$routing_file" "$rollback_file"
-  mv "$tmp_file" "$routing_file"
+  if ! "$route_control_helper" replace-xray-outbound "$routing_file" "$desired_tag" "$candidate_tags_json"; then
+    rm -f "$rollback_file"
+    return 1
+  fi
   if ! xp2p client service restart >/dev/null 2>&1; then
     mv "$rollback_file" "$routing_file"
     reconcile_state_with_routing
@@ -274,23 +271,19 @@ switch_routing_outbound() {
 
 disable_intercept_rule() {
   intercept_disabled && return 0
-  uci set "network.${rule_section}.disabled=1"
-  uci commit network
-  /etc/init.d/network reload
+  "$route_control_helper" set-intercept disabled
   log "disabled LAN intercept rule ${rule_section}; WAN direct fallback is active"
 }
 
 enable_intercept_rule() {
   ! intercept_disabled && return 0
-  uci -q delete "network.${rule_section}.disabled" || true
-  uci commit network
-  /etc/init.d/network reload
+  "$route_control_helper" set-intercept enabled
   log "enabled LAN intercept rule ${rule_section}; table ${route_table} is active"
 }
 
 select_transport() {
 {% for candidate in openwrt_transport_failover_candidates %}
-  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}' '{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in candidate.probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ candidate.probe_policy.required_successes | default(1) | int }}'; then
+  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}' '{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in candidate.probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ candidate.probe_policy.required_successes | default(1) | int }}' '{{ candidate.probes | selectattr("expected_country", "defined") | map(attribute="expected_country") | first | default("") }}' '{{ candidate.endpoint.peer_public_key | default("") }}'; then
     printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}'
     return 0
   fi
@@ -308,8 +301,8 @@ current_transport="$(active_transport)"
 
 preferred_tag='{{ (openwrt_transport_failover_candidates | first).outbound_tag | default('') }}'
 preferred_healthy=false
-if candidate_healthy '{{ (openwrt_transport_failover_candidates | first).type }}' \
-    "$preferred_tag" '{{ (openwrt_transport_failover_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_transport_failover_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_transport_failover_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in (openwrt_transport_failover_candidates | first).probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ (openwrt_transport_failover_candidates | first).probe_policy.required_successes | default(1) | int }}'; then
+  if candidate_healthy '{{ (openwrt_transport_failover_candidates | first).type }}' \
+    "$preferred_tag" '{{ (openwrt_transport_failover_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_transport_failover_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_transport_failover_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in (openwrt_transport_failover_candidates | first).probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ (openwrt_transport_failover_candidates | first).probe_policy.required_successes | default(1) | int }}' '{{ (openwrt_transport_failover_candidates | first).probes | selectattr("expected_country", "defined") | map(attribute="expected_country") | first | default("") }}' '{{ (openwrt_transport_failover_candidates | first).endpoint.peer_public_key | default("") }}'; then
   preferred_healthy=true
 fi
 preferred_failures="$(state_value preferred_failures 0)"
@@ -382,9 +375,7 @@ elif [ "$selected_type" = wireguard ]; then
   selected_interface="$selected_tag"
   if [ "$current_transport" != "$selected_interface" ]; then
     log "transport switch requested: ${current_transport:-none} -> ${selected_interface}"
-    uci set "network.${route_section}.interface=${selected_interface}"
-    uci commit network
-    /etc/init.d/network reload >/dev/null 2>&1 || true
+    "$route_control_helper" set-route-interface "$selected_interface"
     write_state "$selected_interface" 0 0
     log "switched managed intercept route to WireGuard interface ${selected_interface}"
   else

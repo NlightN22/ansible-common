@@ -1,0 +1,31 @@
+---
+- name: Validate OpenWrt route-control runtime helper inputs
+  ansible.builtin.assert:
+    that:
+      - openwrt_route_control_runtime_helper_path | length > 0
+      - openwrt_route_control_runtime_rule_section | length > 0
+      - openwrt_route_control_runtime_route_section | length > 0
+    fail_msg: "OpenWrt route-control runtime helper inputs are incomplete."
+
+- name: Render OpenWrt route-control runtime helper
+  ansible.builtin.set_fact:
+    openwrt_route_control_runtime_helper_content: "{{ lookup('ansible.builtin.template', 'openwrt-route-control-runtime.sh.j2') }}"
+
+- name: Install OpenWrt route-control runtime helper
+  ansible.builtin.raw: |
+    target='{{ openwrt_route_control_runtime_helper_path }}'
+    tmp="${target}.ansible"
+    mkdir -p "$(dirname "$target")"
+    cat > "$tmp" <<'__OPENWRT_ROUTE_CONTROL_RUNTIME__'
+    {{ openwrt_route_control_runtime_helper_content }}
+    __OPENWRT_ROUTE_CONTROL_RUNTIME__
+    chmod 0755 "$tmp"
+    if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
+      mv "$tmp" "$target"
+      echo changed=true
+    else
+      rm -f "$tmp"
+      echo changed=false
+    fi
+  register: openwrt_route_control_runtime_helper_install
+  changed_when: "'changed=true' in openwrt_route_control_runtime_helper_install.stdout"

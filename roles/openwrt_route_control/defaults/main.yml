@@ -7,6 +7,9 @@ openwrt_route_control_allow_empty_declared_state: false
 openwrt_route_control_apply_missing_enabled: true
 openwrt_route_control_cleanup_uci_enabled: false
 openwrt_route_control_reload_network_after_cleanup: true
+openwrt_route_control_runtime_helper_path: /usr/libexec/openwrt-route-control-runtime
+openwrt_route_control_runtime_rule_section: xp2pc_lan_intercept
+openwrt_route_control_runtime_route_section: xp2pc_lan_intercept_default
 
 openwrt_route_control_model_files: []
 openwrt_route_control_model_fragments: []

@@ -66,5 +66,13 @@
     openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes: >-
       {{ (openwrt_transport_candidates | first).probe_policy.required_successes }}
 
+- name: Install the OpenWrt route-control runtime helper
+  ansible.builtin.include_role:
+    name: ansible_common.core.openwrt_route_control
+    tasks_from: runtime_helper
+  vars:
+    openwrt_route_control_runtime_rule_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default('xp2pc_lan_intercept') }}"
+    openwrt_route_control_runtime_route_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default('xp2pc_lan_intercept_default') }}"
+
 - name: Install generic OpenWrt transport failover
   ansible.builtin.include_tasks: main.yml

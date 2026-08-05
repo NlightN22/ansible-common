@@ -65,6 +65,7 @@
       probe_url="$2"
       expected_ip="$3"
       destination_ipv4="$4"
+      expected_country="$5"
       if [ "$probe_kind" = socks_http ]; then
         probe_output="$(fetch_socks_url "$probe_url" '{{ transport_health_candidate.dataplane.socks_port | default(51180) }}' "$destination_ipv4" || true)"
       else
@@ -77,6 +78,10 @@
       fi
       if [ -n "$expected_ip" ] && [ "$actual_ip" != "$expected_ip" ]; then
         failure_reason="probe_${probe_kind}_expected_${expected_ip}_got_${actual_ip}"
+        return 1
+      fi
+      if [ -n "$expected_country" ] && ! printf '%s\n' "$probe_output" | grep -Eiq '"country"[[:space:]]*:[[:space:]]*"?'"$expected_country"'"?|country[=:][[:space:]]*'"$expected_country"; then
+        failure_reason="probe_${probe_kind}_expected_country_${expected_country}"
         return 1
       fi
       return 0
@@ -99,7 +104,7 @@
           probe_successes=0
           probe_count=0
           {% for probe in transport_health_candidate.probes | default([]) %}
-          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' '{{ probe.destination_ipv4 | default([]) | first | default('') }}'; then
+          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' '{{ probe.destination_ipv4 | default([]) | first | default('') }}' '{{ probe.expected_country | default('') }}'; then
             probe_successes=$((probe_successes + 1))
           fi
           probe_count=$((probe_count + 1))
@@ -133,6 +138,7 @@
       wireguard)
         interface='{{ transport_health_candidate.dataplane.interface | default('') }}'
         endpoint='{{ transport_health_candidate.endpoint.host | default('') }}'
+        peer_public_key='{{ transport_health_candidate.endpoint.peer_public_key | default('') }}'
         max_age='{{ transport_health_candidate.dataplane.handshake_max_age_seconds | default(180) | int }}'
         if ! ip link show "$interface" >/dev/null 2>&1; then
           failure_reason="interface_missing_${interface}"
@@ -140,15 +146,16 @@
           failure_reason="endpoint_route_missing_${endpoint}"
         elif ! command -v wg >/dev/null 2>&1; then
           failure_reason=wireguard_command_missing
+        elif [ -z "$peer_public_key" ]; then
+          failure_reason=wireguard_peer_public_key_missing
         else
           now="$(date +%s)"
-          recent_handshake=false
-          for handshake in $(wg show "$interface" latest-handshakes 2>/dev/null | awk '{print $2}' || true); do
-            if [ "$handshake" -gt 0 ] && [ "$((now - handshake))" -le "$max_age" ]; then
-              recent_handshake=true
-            fi
-          done
-          if [ "$recent_handshake" = true ]; then transport_status=healthy; else failure_reason=wireguard_handshake_stale; fi
+          handshake="$(wg show "$interface" latest-handshakes "$peer_public_key" 2>/dev/null | awk 'NF {print $2; exit}' || true)"
+          if [ -n "$handshake" ] && [ "$handshake" -gt 0 ] && [ "$((now - handshake))" -le "$max_age" ]; then
+            transport_status=healthy
+          else
+            failure_reason=wireguard_handshake_stale
+          fi
         fi
         ;;
     esac
