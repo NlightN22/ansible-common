@@ -202,9 +202,8 @@ routing_active_transport() {
   [ -f "$routing_file" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
   jq -r --argjson candidates "$candidate_tags_json" '
-    [.rules[]?.outboundTag? |
-      select(. != null and ($candidates | index(.)) != null)] |
-    last // ""
+    .rules[-1].outboundTag as $tag |
+    if ($tag != null and ($candidates | index($tag)) != null) then $tag else "" end
   ' "$routing_file" 2>/dev/null || true
 }
 

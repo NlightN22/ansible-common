@@ -224,13 +224,13 @@
   register: openwrt_xp2p_three_x_ui_routing_socks_smoke
   changed_when: false
 
-- name: Apply 3x-ui OpenWrt LAN intercept and failover with rollback guard
+- name: Apply 3x-ui OpenWrt LAN intercept with rollback guard
   block:
-    - name: Prepare rollback guard for 3x-ui OpenWrt LAN intercept and failover changes
+    - name: Prepare rollback guard for 3x-ui OpenWrt LAN intercept changes
       ansible.builtin.include_role:
         name: ansible_common.core.openwrt_rollback
 
-    - name: Arm rollback guard before 3x-ui OpenWrt LAN intercept and failover changes
+    - name: Arm rollback guard before 3x-ui OpenWrt LAN intercept changes
       ansible.builtin.include_role:
         name: ansible_common.core.openwrt_rollback
         tasks_from: arm
@@ -238,32 +238,22 @@
     - name: Apply 3x-ui OpenWrt LAN intercept after successful SOCKS smoke test
       ansible.builtin.include_tasks: intercept_apply.yml
 
-    - name: Install 3x-ui OpenWrt LAN intercept failover after intercept apply
-      block:
-        - name: Prepare generic OpenWrt transport failover context
-          ansible.builtin.include_tasks: context.yml
-
-        - name: Install generic OpenWrt transport failover
-          ansible.builtin.include_role:
-            name: ansible_common.core.openwrt_transport_failover
-            tasks_from: main
-
-    - name: Apply 3x-ui OpenWrt LAN intercept manual mode after failover install
+    - name: Apply 3x-ui OpenWrt LAN intercept manual mode
       ansible.builtin.include_tasks: intercept_manual.yml
       when:
         - three_x_ui_intercept_manual_mode | default('auto') != 'auto'
 
-    - name: Reset SSH connection after 3x-ui OpenWrt LAN intercept and failover apply
+    - name: Reset SSH connection after 3x-ui OpenWrt LAN intercept apply
       ansible.builtin.meta: reset_connection
 
-    - name: Cancel rollback guard after successful 3x-ui OpenWrt LAN intercept and failover apply
+    - name: Cancel rollback guard after successful 3x-ui OpenWrt LAN intercept apply
       ansible.builtin.include_role:
         name: ansible_common.core.openwrt_rollback
         tasks_from: cancel
 
   rescue:
-    - name: Leave rollback guard armed after failed 3x-ui OpenWrt LAN intercept or failover apply
+    - name: Leave rollback guard armed after failed 3x-ui OpenWrt LAN intercept apply
       ansible.builtin.fail:
-        msg: "3x-ui OpenWrt LAN intercept or failover apply failed on {{ inventory_hostname }}; rollback guard remains armed."
+        msg: "3x-ui OpenWrt LAN intercept apply failed on {{ inventory_hostname }}; rollback guard remains armed."
   when:
     - openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) | bool
