@@ -26,6 +26,17 @@ def test_failover_delegates_runtime_dataplane_changes_to_route_control():
     assert '/etc/init.d/network reload' not in FAILOVER_TEMPLATE
 
 
+def test_failover_lock_is_outside_xp2p_watched_config_directory():
+    assert 'lock_dir="/var/run/${instance_name}.lock"' in FAILOVER_TEMPLATE
+    assert 'lock_dir="${state_file}.lock"' not in FAILOVER_TEMPLATE
+    assert 'state_file: "/var/lib/openwrt-transport-failover/' in (
+        ROOT / "roles/openwrt_transport_failover/tasks/main.yml"
+    ).read_text(encoding="utf-8")
+    assert 'Remove obsolete failover runtime state from the XP2P watched config directory' in (
+        ROOT / "roles/openwrt_transport_failover/tasks/main.yml"
+    ).read_text(encoding="utf-8")
+
+
 def test_route_control_runtime_helper_owns_runtime_mutations():
     assert "uci commit network" in ROUTE_CONTROL_TEMPLATE
     assert "replace-xray-outbound)" in ROUTE_CONTROL_TEMPLATE

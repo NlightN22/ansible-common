@@ -12,7 +12,10 @@ routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
 state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
 backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
 route_control_helper='{{ openwrt_route_control_runtime_helper_path }}'
-lock_dir="${state_file}.lock"
+# Keep the execution lock outside XP2P's watched config directory. XP2P treats
+# any file or directory change below config-client as a runtime configuration
+# change, so a failover lock there can cancel an in-progress TUN reconciliation.
+lock_dir="/var/run/${instance_name}.lock"
 dead_after_failures='{{ openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures | int }}'
 restore_after_successes='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes | int }}'
 disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disable_intercept_when_dead | bool | lower }}'

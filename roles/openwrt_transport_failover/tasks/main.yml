@@ -31,7 +31,7 @@
     openwrt_xp2p_three_x_ui_intercept_failover_route_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default('xp2pc_lan_intercept_default') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
     openwrt_xp2p_three_x_ui_intercept_failover_routing_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
-    openwrt_xp2p_three_x_ui_intercept_failover_state_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state"
+    openwrt_xp2p_three_x_ui_intercept_failover_state_file: "/var/lib/openwrt-transport-failover/{{ openwrt_xp2p_three_x_ui_intercept_failover.instance_name | default('openwrt-transport-failover') }}.state"
     openwrt_xp2p_three_x_ui_intercept_failover_backup_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json.failover-base"
     openwrt_route_control_runtime_helper_path: /usr/libexec/openwrt-route-control-runtime
     openwrt_transport_failover_candidates: "{{ openwrt_transport_candidates }}"
@@ -171,6 +171,24 @@
   when:
     - openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
     - openwrt_xp2p_three_x_ui_intercept_failover_service_enabled | bool
+
+- name: Remove obsolete failover runtime state from the XP2P watched config directory
+  ansible.builtin.raw: |
+    changed=false
+    legacy_state='{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state'
+    legacy_lock="${legacy_state}.lock"
+    if [ -f "$legacy_state" ]; then
+      rm -f "$legacy_state"
+      changed=true
+    fi
+    if [ -d "$legacy_lock" ]; then
+      rmdir "$legacy_lock" 2>/dev/null || true
+      [ ! -d "$legacy_lock" ] && changed=true
+    fi
+    echo "changed=$changed"
+  register: openwrt_xp2p_three_x_ui_intercept_failover_legacy_lock_cleanup
+  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_legacy_lock_cleanup.stdout"
+  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
 
 - name: Stop and disable 3x-ui OpenWrt LAN intercept failover procd service
   ansible.builtin.raw: |
