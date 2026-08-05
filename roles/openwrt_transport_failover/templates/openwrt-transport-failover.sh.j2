@@ -8,7 +8,6 @@ transport_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_interface }}'
 route_table='{{ openwrt_xp2p_three_x_ui_intercept_failover_table }}'
 rule_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_rule_section }}'
 route_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_route_section }}'
-wan_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_wan_interface }}'
 routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
 state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
 backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
@@ -111,7 +110,7 @@ wan_probe() {
     resolve_args=''
     [ -n "$destination_ipv4" ] && resolve_args="--resolve ${probe_host}:${probe_port}:${destination_ipv4}"
     # shellcheck disable=SC2086
-    probe_output="$(curl --interface "$wan_interface" -fsS $resolve_args --connect-timeout 3 --max-time 8 \
+    probe_output="$(curl -fsS $resolve_args --connect-timeout 3 --max-time 8 \
       "$probe_url" 2>/dev/null || true)"
     if [ -n "$probe_output" ] && {
       [ -z "$expected_country" ] || printf '%s\n' "$probe_output" | grep -Eiq '"country"[[:space:]]*:[[:space:]]*"?'"$expected_country"'"?|country[=:][[:space:]]*'"$expected_country";
@@ -134,7 +133,6 @@ candidate_healthy() {
   expected_country="$8"
   peer_public_key="$9"
   if [ "$candidate_type" = wan_direct ]; then
-    [ -n "$wan_interface" ] || return 1
     wan_probe "$probe_urls" "$probe_destinations" "$required_successes" "$expected_country"
     return $?
   fi

@@ -41,8 +41,7 @@
 
     fetch_wan_url() {
       request_url="$1"
-      wan_interface="$2"
-      destination_ipv4="$3"
+      destination_ipv4="$2"
       if command -v curl >/dev/null 2>&1; then
         resolve_args=''
         if [ -n "$destination_ipv4" ]; then
@@ -54,7 +53,7 @@
           resolve_args="--resolve ${request_host}:${request_port}:${destination_ipv4}"
         fi
         # shellcheck disable=SC2086
-        curl --interface "$wan_interface" -fsS $resolve_args --connect-timeout 8 --max-time 30 "$request_url"
+        curl -fsS $resolve_args --connect-timeout 8 --max-time 30 "$request_url"
       else
         return 127
       fi
@@ -119,16 +118,12 @@
         fi
         ;;
       wan_direct)
-        wan_interface='{{ (transport_health_router_model.uplinks | selectattr("active", "equalto", true) | sort(attribute="priority") | map(attribute="interface") | first) | default("") }}'
         probe_successes=0
         probe_count=0
         required_probe_successes='{{ transport_health_candidate.probe_policy.required_successes | default(1) | int }}'
-        if [ -z "$wan_interface" ]; then
-          failure_reason=active_wan_interface_missing
-        fi
         {% for probe in transport_health_candidate.probes | default([]) %}
         if [ "$failure_reason" = none ]; then
-          probe_output="$(fetch_wan_url '{{ probe.url | default('') }}' "$wan_interface" '{{ probe.destination_ipv4 | default([]) | first | default('') }}' || true)"
+          probe_output="$(fetch_wan_url '{{ probe.url | default('') }}' '{{ probe.destination_ipv4 | default([]) | first | default('') }}' || true)"
           actual_ip="$(printf '%s\n' "$probe_output" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
           probe_ok=true
           if [ -z "$actual_ip" ]; then

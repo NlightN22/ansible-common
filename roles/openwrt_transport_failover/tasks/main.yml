@@ -9,19 +9,6 @@
     file: "{{ inventory_env_dir }}/models/openwrt/{{ inventory_hostname }}.yml"
     name: openwrt_transport_failover_router_document
 
-- name: Resolve the active WAN interface for runtime direct probes
-  ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_intercept_failover_wan_interface: >-
-      {{
-        (
-          openwrt_transport_failover_router_document.openwrt_router.uplinks
-          | selectattr('active', 'equalto', true)
-          | sort(attribute='priority')
-          | map(attribute='interface')
-          | first
-        ) | default('')
-      }}
-
 - name: Build 3x-ui OpenWrt LAN intercept failover effective settings
   ansible.builtin.set_fact:
     openwrt_xp2p_three_x_ui_intercept_failover_enabled: "{{ openwrt_xp2p_three_x_ui_intercept_enabled | bool and openwrt_xp2p_three_x_ui_intercept_failover.enabled | default(false) | bool }}"
@@ -42,7 +29,6 @@
     openwrt_xp2p_three_x_ui_intercept_failover_table: "{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default('100') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_rule_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default('xp2pc_lan_intercept') }}"
     openwrt_xp2p_three_x_ui_intercept_failover_route_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default('xp2pc_lan_intercept_default') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_wan_interface: "{{ openwrt_xp2p_three_x_ui_intercept_failover_wan_interface }}"
     openwrt_xp2p_three_x_ui_intercept_failover_socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
     openwrt_xp2p_three_x_ui_intercept_failover_routing_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
     openwrt_xp2p_three_x_ui_intercept_failover_state_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state"
