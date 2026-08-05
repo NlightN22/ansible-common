@@ -120,6 +120,9 @@
         ;;
       wan_direct)
         wan_interface='{{ (transport_health_router_model.uplinks | selectattr("active", "equalto", true) | sort(attribute="priority") | map(attribute="interface") | first) | default("") }}'
+        probe_successes=0
+        probe_count=0
+        required_probe_successes='{{ transport_health_candidate.probe_policy.required_successes | default(1) | int }}'
         if [ -z "$wan_interface" ]; then
           failure_reason=active_wan_interface_missing
         fi
@@ -127,13 +130,29 @@
         if [ "$failure_reason" = none ]; then
           probe_output="$(fetch_wan_url '{{ probe.url | default('') }}' "$wan_interface" '{{ probe.destination_ipv4 | default([]) | first | default('') }}' || true)"
           actual_ip="$(printf '%s\n' "$probe_output" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
-          [ -n "$actual_ip" ] || failure_reason="probe_{{ probe.type }}_empty"
-          if [ -n '{{ probe.expected_public_ip | default('') }}' ] && [ "$actual_ip" != '{{ probe.expected_public_ip | default('') }}' ]; then
+          probe_ok=true
+          if [ -z "$actual_ip" ]; then
+            probe_ok=false
+            failure_reason="probe_{{ probe.type }}_empty"
+          elif [ -n '{{ probe.expected_public_ip | default('') }}' ] && [ "$actual_ip" != '{{ probe.expected_public_ip | default('') }}' ]; then
+            probe_ok=false
             failure_reason="probe_{{ probe.type }}_expected_{{ probe.expected_public_ip | default('') }}_got_${actual_ip}"
+          elif [ -n '{{ probe.expected_country | default('') }}' ] && ! printf '%s\n' "$probe_output" | grep -Eiq '"country"[[:space:]]*:[[:space:]]*"?'"{{ probe.expected_country | default('') }}"'"?|country[=:][[:space:]]*'"{{ probe.expected_country | default('') }}"; then
+            probe_ok=false
+            failure_reason="probe_{{ probe.type }}_expected_country_{{ probe.expected_country | default('') }}"
           fi
+          if [ "$probe_ok" = true ]; then
+            probe_successes=$((probe_successes + 1))
+          fi
+          probe_count=$((probe_count + 1))
         fi
         {% endfor %}
-        if [ "$failure_reason" = none ]; then transport_status=healthy; fi
+        if [ "$probe_successes" -ge "$required_probe_successes" ]; then
+          transport_status=healthy
+          failure_reason=none
+        elif [ "$failure_reason" = none ]; then
+          failure_reason="probe_quorum_${probe_successes}_${required_probe_successes}"
+        fi
         ;;
       wireguard)
         interface='{{ transport_health_candidate.dataplane.interface | default('') }}'
