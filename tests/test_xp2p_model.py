@@ -110,6 +110,35 @@ class XP2PModelTests(unittest.TestCase):
 
         self.assertEqual(redirect_cidrs(view), {"198.51.100.189/32"})
 
+    def test_transport_id_is_resolved_for_wireguard_endpoint_redirects(self) -> None:
+        model = {
+            "networks": {
+                "relay-a": self.model["networks"]["relay-a"],
+                "site-a": {
+                    "id": "site-a",
+                    "type": "wireguard",
+                    "hub": "edge-a",
+                    "preferred_transport": {
+                        "transport_id": "relay-transport",
+                        "routed_cidrs": ["203.0.113.150/32"],
+                    },
+                },
+            },
+            "transports": {
+                "relay-transport": {
+                    "id": "relay-transport",
+                    "type": "xp2p",
+                    "star": "relay-a",
+                    "interface": "xp2pc",
+                    "outbound_tag": "proxy-relay-a-example-test",
+                },
+            },
+        }
+
+        view = self.module.architecture_xp2p_view(model, "relay-a", "edge-b")
+
+        self.assertEqual(redirect_cidrs(view), {"203.0.113.150/32"})
+
     def test_server_reverse_redirect_points_wireguard_endpoint_to_hub_client(self) -> None:
         view = self.module.architecture_xp2p_view(self.model, "relay-a", "relay-a.example.test")
 

@@ -1,0 +1,44 @@
+---
+- name: Select declared XP2P server users with credentials
+  ansible.builtin.set_fact:
+    xp2p_declared_server_users: >-
+      {{
+        resolved_xp2p_network.clients
+        | selectattr('user', 'defined')
+        | selectattr('password', 'defined')
+        | selectattr('password', 'ne', '')
+        | list
+      }}
+
+- name: Read current XP2P server users
+  ansible.builtin.raw: xp2p server user list
+  register: xp2p_server_users_before
+  changed_when: false
+  no_log: true
+  when: xp2p_declared_server_users | length > 0
+
+- name: Reconcile declared XP2P server users
+  ansible.builtin.raw: >-
+    {% if item.user in xp2p_server_users_before.stdout %}
+    xp2p server user update '{{ item.user }}' --password '{{ item.password }}'
+    {% else %}
+    xp2p server user add --id '{{ item.user }}' --host '{{ resolved_xp2p_network.endpoint_name }}' --password '{{ item.password }}'
+    {% endif %}
+  loop: "{{ xp2p_declared_server_users }}"
+  loop_control:
+    label: "{{ item.user }}"
+  register: xp2p_server_users_apply
+  changed_when: true
+  no_log: true
+  when: xp2p_declared_server_users | length > 0
+
+- name: Verify declared XP2P server users
+  ansible.builtin.raw: xp2p server user list
+  register: xp2p_server_users_after
+  changed_when: false
+  no_log: true
+  failed_when: item.user not in xp2p_server_users_after.stdout
+  loop: "{{ xp2p_declared_server_users }}"
+  loop_control:
+    label: "{{ item.user }}"
+  when: xp2p_declared_server_users | length > 0

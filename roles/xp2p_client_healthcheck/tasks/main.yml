@@ -21,16 +21,54 @@
   ansible.builtin.raw: xp2p --version
   register: xp2p_client_version
   changed_when: false
+  when: xp2p_member_platform != 'windows'
+
+- name: Check xp2p client command on Windows
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Continue'
+    $xp2p = 'C:\Program Files\xp2p\xp2p.exe'
+    if (-not (Test-Path -LiteralPath $xp2p)) { $xp2p = (Get-Command xp2p.exe -ErrorAction Stop).Source }
+    $output = & $xp2p --version 2>&1
+    $exitCode = $LASTEXITCODE
+    ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($exitCode -ne 0) { throw "xp2p --version failed with exit code $exitCode" }
+  register: xp2p_client_version_windows
+  changed_when: false
+  when: xp2p_member_platform == 'windows'
 
 - name: Check xp2p client service status
   ansible.builtin.raw: xp2p client service status
   register: xp2p_client_service_status
   changed_when: false
+  when: xp2p_member_platform != 'windows'
+
+- name: Check xp2p client service status on Windows
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $service = Get-Service -Name 'xp2p-client' -ErrorAction Stop
+    "status=$($service.Status) start_type=$($service.StartType)"
+  register: xp2p_client_service_status_windows
+  changed_when: false
+  when: xp2p_member_platform == 'windows'
 
 - name: Collect xp2p client state
   ansible.builtin.raw: xp2p client state
   register: xp2p_client_state
   changed_when: false
+  when: xp2p_member_platform != 'windows'
+
+- name: Collect xp2p client state on Windows
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Continue'
+    $xp2p = 'C:\Program Files\xp2p\xp2p.exe'
+    if (-not (Test-Path -LiteralPath $xp2p)) { $xp2p = (Get-Command xp2p.exe -ErrorAction Stop).Source }
+    $output = & $xp2p client state 2>&1
+    $exitCode = $LASTEXITCODE
+    ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($exitCode -ne 0) { throw "xp2p client state failed with exit code $exitCode" }
+  register: xp2p_client_state_windows
+  changed_when: false
+  when: xp2p_member_platform == 'windows'
 
 - name: Validate xp2p client endpoint status on POSIX clients
   ansible.builtin.raw: |
@@ -58,12 +96,14 @@
 - name: Validate xp2p client endpoint status on Windows clients
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
+    $xp2p = 'C:\Program Files\xp2p\xp2p.exe'
+    if (-not (Test-Path -LiteralPath $xp2p)) { $xp2p = (Get-Command xp2p.exe -ErrorAction Stop).Source }
     function Invoke-Xp2pText {
       param([string[]]$Arguments)
       $previousErrorActionPreference = $ErrorActionPreference
       $ErrorActionPreference = 'Continue'
       try {
-        $output = & xp2p @Arguments 2>&1
+        $output = & $xp2p @Arguments 2>&1
         $exitCode = $LASTEXITCODE
       } finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -100,16 +140,43 @@
   ansible.builtin.raw: xp2p client redirect list
   register: xp2p_client_redirects_state
   changed_when: false
+  when: xp2p_member_platform != 'windows'
+
+- name: Collect xp2p client redirects on Windows
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Continue'
+    $xp2p = 'C:\Program Files\xp2p\xp2p.exe'
+    if (-not (Test-Path -LiteralPath $xp2p)) { $xp2p = (Get-Command xp2p.exe -ErrorAction Stop).Source }
+    $output = & $xp2p client redirect list 2>&1
+    $exitCode = $LASTEXITCODE
+    ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($exitCode -ne 0) { throw "xp2p client redirect list failed with exit code $exitCode" }
+  register: xp2p_client_redirects_state_windows
+  changed_when: false
+  when: xp2p_member_platform == 'windows'
 
 - name: Validate XP2P client health
   ansible.builtin.assert:
     that:
-      - xp2p_client_service_status.stdout is search('(?i)(running|active|enabled)')
+      - >-
+        (
+          xp2p_client_service_status_windows.stdout
+          if xp2p_member_platform == 'windows'
+          else xp2p_client_service_status.stdout
+        ) is search('(?i)(running|active|enabled)')
       - >-
         'xp2p_endpoint_health=ok' in
         (
           xp2p_client_endpoint_health_windows.stdout
           | default(xp2p_client_endpoint_health_posix.stdout | default(''))
         )
-      - xp2p_client_expected_redirects | map(attribute='cidr') | select('in', xp2p_client_redirects_state.stdout) | list | length == xp2p_client_expected_redirects | length
+      - >-
+        xp2p_client_expected_redirects | map(attribute='cidr') | select(
+          'in',
+          (
+            xp2p_client_redirects_state_windows.stdout
+            if xp2p_member_platform == 'windows'
+            else xp2p_client_redirects_state.stdout
+          )
+        ) | list | length == xp2p_client_expected_redirects | length
     fail_msg: "XP2P client healthcheck failed on {{ inventory_hostname }}."

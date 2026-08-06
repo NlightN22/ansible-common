@@ -167,6 +167,11 @@ uci -q delete "network.${interface_name}.listen_port" || true
 {% endif %}
 uci -q delete "network.${interface_name}.addresses" || true
 uci add_list "network.${interface_name}.addresses=${spoke_address}"
+{% if openwrt_wireguard_apply_site.mtu is defined %}
+uci set "network.${interface_name}.mtu={{ openwrt_wireguard_apply_site.mtu | int }}"
+{% else %}
+uci -q delete "network.${interface_name}.mtu" || true
+{% endif %}
 
 {% if openwrt_wireguard_apply_member.role | default('spoke') == 'hub' %}
 delete_named_sections_by_prefix network "${site_id}_wg_hub_route_"

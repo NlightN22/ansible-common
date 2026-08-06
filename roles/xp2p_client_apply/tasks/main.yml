@@ -1,18 +1,25 @@
 ---
-- name: Select XP2P client apply model
+- name: Apply XP2P client settings on Windows
+  ansible.builtin.include_tasks: windows.yml
+  when: xp2p_member_platform == 'windows'
+
+- name: Select XP2P client apply model on POSIX
   ansible.builtin.set_fact:
     xp2p_client_network: "{{ resolved_xp2p_network }}"
     xp2p_client_redirects: "{{ resolved_xp2p_network.managed_redirects }}"
     xp2p_redirect_outbound_tag: "{{ resolved_xp2p_network.outbound_tag }}"
+  when: xp2p_member_platform != 'windows'
 
 - name: Check xp2p command
   ansible.builtin.raw: "command -v xp2p"
   register: xp2p_client_command_check
   changed_when: false
+  when: xp2p_member_platform != 'windows'
 
 - name: Ensure xp2p client init script exists
   ansible.builtin.raw: test -x /etc/init.d/xp2p-client
   changed_when: false
+  when: xp2p_member_platform != 'windows'
 
 - name: Ensure xp2p client service starts on boot
   ansible.builtin.raw: |
@@ -24,6 +31,7 @@
     echo "changed=$changed"
   register: xp2p_client_service_enable
   changed_when: "'changed=true' in xp2p_client_service_enable.stdout"
+  when: xp2p_member_platform != 'windows'
 
 - name: Validate managed xp2p client redirects
   ansible.builtin.assert:
@@ -31,7 +39,9 @@
       - xp2p_client_redirects | length > 0
       - xp2p_redirect_outbound_tag | length > 0
     fail_msg: "Managed XP2P client redirects are enabled but redirect model is empty."
-  when: xp2p_managed_redirects_enabled | bool
+  when:
+    - xp2p_managed_redirects_enabled | bool
+    - xp2p_member_platform != 'windows'
 
 - name: Manage xp2p client redirect list
   ansible.builtin.raw: |
@@ -80,13 +90,16 @@
     fi
   register: xp2p_client_redirects_update
   changed_when: "'changed=true' in xp2p_client_redirects_update.stdout"
-  when: xp2p_managed_redirects_enabled | bool
+  when:
+    - xp2p_managed_redirects_enabled | bool
+    - xp2p_member_platform != 'windows'
 
 - name: Wait for xp2p config watcher to settle
   ansible.builtin.pause:
     seconds: "{{ xp2p_redirect_settle_seconds }}"
   when:
     - xp2p_managed_redirects_enabled | bool
+    - xp2p_member_platform != 'windows'
     - xp2p_client_redirects_update is changed
 
 - name: Run XP2P client healthcheck

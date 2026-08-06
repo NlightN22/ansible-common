@@ -1,0 +1,95 @@
+---
+- name: Validate Windows XP2P client model
+  ansible.builtin.assert:
+    that:
+      - resolved_xp2p_network.endpoint_host | default('') | length > 0
+      - resolved_xp2p_network.endpoint_port | default(0) | int > 0
+      - resolved_xp2p_network.endpoint_name | default('') | length > 0
+      - resolved_xp2p_network.outbound_tag | default('') | length > 0
+      - resolved_xp2p_network.current_member.user | default('') | length > 0
+      - resolved_xp2p_network.current_member.password | default('') | length > 0
+    fail_msg: >-
+      Windows XP2P client model is incomplete for {{ inventory_hostname }};
+      endpoint and client credentials are required.
+
+- name: Ensure Windows XP2P client package and service are installed
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $version = '{{ xp2p_windows_client_version }}'
+    $baseUrl = '{{ xp2p_windows_client_release_base_url }}'
+    $installDir = 'C:\Program Files\xp2p'
+    if (Test-Path -LiteralPath $installDir) { $env:Path = "$installDir;$env:Path" }
+    $command = Get-Command xp2p.exe -ErrorAction SilentlyContinue
+    if (-not $command) {
+      $asset = if ([Environment]::Is64BitOperatingSystem) { "xp2p-$version-windows-amd64.msi" } else { "xp2p-$version-windows-x86.msi" }
+      $msi = Join-Path $env:TEMP $asset
+      Invoke-WebRequest -Uri "$baseUrl/v$version/$asset" -OutFile $msi
+      $process = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', $msi, '/qn', '/norestart') -Wait -PassThru
+      Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+      if ($process.ExitCode -ne 0) { throw "msiexec failed with exit code $($process.ExitCode)" }
+      if (Test-Path -LiteralPath $installDir) { $env:Path = "$installDir;$env:Path" }
+      $command = Get-Command xp2p.exe -ErrorAction Stop
+      'xp2p_package=installed'
+    } else {
+      'xp2p_package=present'
+    }
+    $service = Get-Service -Name 'xp2p-client' -ErrorAction SilentlyContinue
+    if (-not $service) { throw 'xp2p-client service is not installed' }
+    if ($service.StartType -ne 'Automatic') { Set-Service -Name 'xp2p-client' -StartupType Automatic }
+  register: xp2p_windows_package
+  changed_when: >-
+    'xp2p_package=installed' in xp2p_windows_package.stdout
+    or 'xp2p-client service is not installed' in xp2p_windows_package.stderr
+
+- name: Read existing Windows XP2P client endpoints
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Continue'
+    $xp2p = 'C:\Program Files\xp2p\xp2p.exe'
+    if (-not (Test-Path -LiteralPath $xp2p)) { $xp2p = (Get-Command xp2p.exe -ErrorAction Stop).Source }
+    $output = & $xp2p client list 2>&1
+    $exitCode = $LASTEXITCODE
+    ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    if ($exitCode -ne 0) { throw "xp2p client list failed with exit code $exitCode" }
+  register: xp2p_windows_client_list
+  changed_when: false
+  no_log: true
+
+- name: Install or update the declared Windows XP2P endpoint
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $tag = '{{ resolved_xp2p_network.outbound_tag }}'
+    $user = '{{ resolved_xp2p_network.current_member.user }}'
+    $password = '{{ resolved_xp2p_network.current_member.password }}'
+    $xp2p = 'C:\Program Files\xp2p\xp2p.exe'
+    if (-not (Test-Path -LiteralPath $xp2p)) { $xp2p = (Get-Command xp2p.exe -ErrorAction Stop).Source }
+    function Invoke-Xp2pText {
+      param([string[]]$Arguments)
+      $previous = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        $output = & $xp2p @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+      } finally {
+        $ErrorActionPreference = $previous
+      }
+      $text = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+      if ($exitCode -ne 0) {
+        if ($text) { $text }
+        throw "xp2p $($Arguments -join ' ') failed with exit code $exitCode"
+      }
+      return $text
+    }
+    $state = Invoke-Xp2pText -Arguments @('client', 'list')
+    if ($state -match [regex]::Escape($tag)) {
+      Invoke-Xp2pText -Arguments @('client', 'update', $tag, '--user', $user, '--password', $password)
+    } else {
+      Invoke-Xp2pText -Arguments @('client', 'install', '--host', '{{ resolved_xp2p_network.endpoint_host }}', '--port', '{{ resolved_xp2p_network.endpoint_port }}', '--user', $user, '--password', $password, '--sni', '{{ resolved_xp2p_network.server_name | default(resolved_xp2p_network.endpoint_name) }}', '--strict-tls')
+    }
+    Invoke-Xp2pText -Arguments @('client', 'service', 'restart')
+  register: xp2p_windows_endpoint_apply
+  changed_when: true
+  no_log: true
+
+- name: Run Windows XP2P client healthcheck after apply
+  ansible.builtin.include_role:
+    name: ansible_common.core.xp2p_client_healthcheck

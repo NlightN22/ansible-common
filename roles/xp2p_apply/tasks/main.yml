@@ -10,10 +10,16 @@
 
 - name: Run XP2P hub apply placeholder
   block:
+    - name: Reconcile declared XP2P server users
+      ansible.builtin.include_role:
+        name: ansible_common.core.xp2p_server_users_apply
+
     - name: Run XP2P hub healthcheck before hub changes
       ansible.builtin.include_role:
         name: ansible_common.core.xp2p_hub_healthcheck
-      when: xp2p_apply_healthcheck_enabled | bool
+      when:
+        - xp2p_apply_healthcheck_enabled | bool
+        - xp2p_declared_server_users | default([]) | length == 0
 
     - name: Ensure XP2P certbot deploy hook directory exists
       ansible.builtin.file:

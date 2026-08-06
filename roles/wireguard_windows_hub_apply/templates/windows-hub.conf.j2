@@ -5,6 +5,9 @@
 PrivateKey = {{ wireguard_hub_private_key }}
 Address = {{ wireguard_site.hub_address }}
 ListenPort = {{ wireguard_site.listen_port }}
+{% if wireguard_site.mtu is defined %}
+MTU = {{ wireguard_site.mtu | int }}
+{% endif %}
 {% for command in wireguard_site.post_up | default([]) %}
 PostUp = {{ command }}
 {% endfor %}

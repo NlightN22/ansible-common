@@ -366,7 +366,35 @@ def _derived_redirects(
             preferred_transport = transport.get("source", {}).get("preferred_transport", {})
         if not isinstance(preferred_transport, dict):
             continue
-        if preferred_transport.get("type") != "xp2p" or str(preferred_transport.get("star")) != xp2p_id:
+        if preferred_transport.get("transport_id"):
+            transport_catalog = model.get("transports", {})
+            transport_definition = transport_catalog.get(preferred_transport["transport_id"])
+            if isinstance(transport_definition, dict):
+                preferred_transport = _deep_merge(
+                    deepcopy(transport_definition),
+                    {
+                        key: value
+                        for key, value in preferred_transport.items()
+                        if key in {"routed_cidrs", "route", "failover"}
+                    },
+                )
+        if preferred_transport.get("type") not in {"xp2p", "xp2p_xray"}:
+            continue
+        transport_endpoint = preferred_transport.get("endpoint", {})
+        if not isinstance(transport_endpoint, dict):
+            transport_endpoint = {}
+        transport_matches = str(preferred_transport.get("star")) == xp2p_id
+        transport_matches = transport_matches or str(preferred_transport.get("id")) in {
+            xp2p_id,
+            f"xp2p_{xp2p_id}",
+        }
+        transport_matches = transport_matches or transport_endpoint.get("host") in {
+            source.get("endpoint_name"),
+            source.get("endpoint_host"),
+            xp2p_network.get("endpoint_name"),
+            xp2p_network.get("endpoint_host"),
+        }
+        if not transport_matches:
             continue
         routed_cidrs = preferred_transport.get("routed_cidrs", [])
         if not isinstance(routed_cidrs, list):
