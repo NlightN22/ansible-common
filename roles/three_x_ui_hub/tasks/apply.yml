@@ -12,6 +12,8 @@
       - three_x_ui_hub_star.reconciliation.preserve_existing_clients | bool
       - not three_x_ui_hub_star.reconciliation.remove_unmanaged_clients | bool
       - three_x_ui_hub_star.clients | length > 0
+      - three_x_ui_hub_star.panel.route_only is defined
+      - three_x_ui_hub_star.panel.route_only | type_debug == 'bool'
     fail_msg: "The 3x-ui star model is incomplete or does not match {{ inventory_hostname }}."
 
 - name: Validate 3x-ui panel API credentials are configured
@@ -79,6 +81,57 @@
       - three_x_ui_hub_managed_inbound is mapping
       - three_x_ui_hub_managed_inbound.protocol == three_x_ui_hub_star.panel.protocol
     fail_msg: "Managed 3x-ui inbound {{ three_x_ui_hub_star.panel.inbound_id }} was not found or has unexpected protocol."
+
+- name: Read managed inbound sniffing settings
+  ansible.builtin.set_fact:
+    three_x_ui_hub_managed_inbound_sniffing: >-
+      {{
+        three_x_ui_hub_managed_inbound.sniffing
+        if three_x_ui_hub_managed_inbound.sniffing is mapping
+        else (three_x_ui_hub_managed_inbound.sniffing | default('{}') | from_json)
+      }}
+
+- name: Build managed inbound update payload with declared route-only behavior
+  ansible.builtin.set_fact:
+    three_x_ui_hub_managed_inbound_update: >-
+      {{
+        (
+          three_x_ui_hub_managed_inbound
+          | dict2items
+          | rejectattr('key', 'equalto', 'clientStats')
+          | list
+          | items2dict
+        )
+        | combine({
+            'sniffing': (
+              three_x_ui_hub_managed_inbound_sniffing
+              | combine({'routeOnly': three_x_ui_hub_star.panel.route_only | bool})
+              | to_json
+            )
+          })
+      }}
+
+- name: Apply declared route-only behavior to the managed inbound
+  ansible.builtin.uri:
+    url: "{{ three_x_ui_hub_panel_url }}/panel/api/inbounds/update/{{ three_x_ui_hub_star.panel.inbound_id | int }}"
+    method: POST
+    headers:
+      Cookie: "{{ three_x_ui_hub_panel_login.cookies_string }}"
+      Content-Type: application/json
+    body_format: raw
+    body: "{{ three_x_ui_hub_managed_inbound_update | to_json }}"
+    validate_certs: "{{ three_x_ui_hub_panel_validate_certs | bool }}"
+    return_content: true
+    timeout: 10
+  register: three_x_ui_hub_inbound_update_result
+  changed_when: true
+  failed_when: not (three_x_ui_hub_inbound_update_result.json.success | default(false) | bool)
+  no_log: true
+  delegate_to: "{{ three_x_ui_hub_panel_api_delegate_to }}"
+  when: >-
+    (
+      three_x_ui_hub_managed_inbound_sniffing.routeOnly | default(false) | bool
+    ) != (three_x_ui_hub_star.panel.route_only | bool)
 
 - name: Build current 3x-ui client list
   ansible.builtin.set_fact:
