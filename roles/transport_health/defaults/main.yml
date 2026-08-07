@@ -3,4 +3,5 @@ transport_health_model: {}
 transport_health_router_model: {}
 transport_health_candidates: []
 transport_health_fail_on_dead: true
+transport_health_require_wan_direct: true
 transport_health_active_outbound_tag: ''

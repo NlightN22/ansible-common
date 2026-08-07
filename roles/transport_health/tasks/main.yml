@@ -7,10 +7,13 @@
       - transport_health_candidates is sequence
       - transport_health_candidates | length > 0
       - transport_health_candidates | map(attribute='id') | list | length == transport_health_candidates | map(attribute='id') | list | unique | length
-      - (transport_health_candidates | map(attribute='id') | list | last) == 'wan_direct'
+      - >-
+        not (transport_health_require_wan_direct | bool)
+        or (transport_health_candidates | map(attribute='id') | list | last) == 'wan_direct'
     fail_msg: >-
-      Transport health requires a non-empty unique ordered candidate chain ending
-      in wan_direct on {{ inventory_hostname }}.
+      Transport health requires a non-empty unique candidate chain{{
+        ' ending in wan_direct' if transport_health_require_wan_direct | bool else ''
+      }} on {{ inventory_hostname }}.
 
 - name: Initialize normalized transport health candidate state
   ansible.builtin.set_fact:

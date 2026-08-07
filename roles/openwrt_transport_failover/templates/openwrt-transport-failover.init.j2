@@ -5,9 +5,9 @@ USE_PROCD=1
 START=96
 STOP=10
 
-name='{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}'
-command_path='{{ openwrt_xp2p_three_x_ui_intercept_failover_script_path }}'
-interval_seconds='{{ openwrt_xp2p_three_x_ui_intercept_failover_interval_seconds | int }}'
+name='{{ openwrt_transport_failover_intercept_failover_instance_name }}'
+command_path='{{ openwrt_transport_failover_intercept_failover_script_path }}'
+interval_seconds='{{ openwrt_transport_failover_intercept_failover_interval_seconds | int }}'
 
 start_service() {
   procd_open_instance

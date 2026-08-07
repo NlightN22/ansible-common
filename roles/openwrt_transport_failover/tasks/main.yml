@@ -1,73 +1,73 @@
 ---
-- name: Build 3x-ui OpenWrt LAN intercept failover settings
+- name: Build OpenWrt transport LAN intercept failover settings
   ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_intercept_failover: "{{ openwrt_xp2p_three_x_ui_routing.intercept.failover | default({}) }}"
-    openwrt_xp2p_three_x_ui_intercept_enabled: "{{ openwrt_xp2p_three_x_ui_routing.intercept_enabled | default(openwrt_xp2p_three_x_ui_routing.intercept.enabled | default(false)) }}"
+    openwrt_transport_failover_intercept_failover: "{{ openwrt_transport_failover_routing.intercept.failover | default({}) }}"
+    openwrt_transport_failover_intercept_enabled: "{{ openwrt_transport_failover_routing.intercept_enabled | default(openwrt_transport_failover_routing.intercept.enabled | default(false)) }}"
 
 - name: Load the selected OpenWrt router transport binding
   ansible.builtin.include_vars:
     file: "{{ inventory_env_dir }}/models/openwrt/{{ inventory_hostname }}.yml"
     name: openwrt_transport_failover_router_document
 
-- name: Build 3x-ui OpenWrt LAN intercept failover effective settings
+- name: Build OpenWrt transport LAN intercept failover effective settings
   ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_intercept_failover_enabled: "{{ openwrt_xp2p_three_x_ui_intercept_enabled | bool and openwrt_xp2p_three_x_ui_intercept_failover.enabled | default(false) | bool }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_service_enabled: "{{ openwrt_xp2p_three_x_ui_intercept_failover.service_enabled | default(true) | bool }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_instance_name: "{{ openwrt_xp2p_three_x_ui_intercept_failover.instance_name | default('openwrt-transport-failover') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_script_path: "{{ openwrt_xp2p_three_x_ui_intercept_failover.script_path | default('/usr/local/sbin/openwrt-transport-failover') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_service_path: "{{ openwrt_xp2p_three_x_ui_intercept_failover.service_path | default('/etc/init.d/openwrt-transport-failover') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_legacy_script_path: /usr/local/sbin/xp2pc-lan-intercept-failover
-    openwrt_xp2p_three_x_ui_intercept_failover_legacy_service_path: /etc/init.d/xp2pc-lan-intercept-failover
-    openwrt_xp2p_three_x_ui_intercept_failover_interval_seconds: "{{ openwrt_xp2p_three_x_ui_intercept_failover.interval_seconds | default(10) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures: "{{ openwrt_xp2p_three_x_ui_intercept_failover.dead_after_failures | default(3) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes: "{{ openwrt_xp2p_three_x_ui_intercept_failover.restore_after_successes | default(3) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_disable_intercept_when_dead: "{{ openwrt_xp2p_three_x_ui_intercept_failover.disable_intercept_when_dead | default(true) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive: "{{ openwrt_xp2p_three_x_ui_intercept_failover.restore_intercept_when_alive | default(true) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke: "{{ openwrt_xp2p_three_x_ui_intercept_failover.use_socks_smoke | default(true) }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_proxy_outbound_tag: "{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_interface: "{{ openwrt_xp2p_three_x_ui_routing.intercept.interface | default('xp2pc') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_table: "{{ openwrt_xp2p_three_x_ui_routing.intercept.table | default('100') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_rule_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.rule_section | default('xp2pc_lan_intercept') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_route_section: "{{ openwrt_xp2p_three_x_ui_routing.intercept.route_section | default('xp2pc_lan_intercept_default') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_socks_port: "{{ openwrt_xp2p_three_x_ui_routing.socks_port }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_routing_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
-    openwrt_xp2p_three_x_ui_intercept_failover_state_file: "/var/lib/openwrt-transport-failover/{{ openwrt_xp2p_three_x_ui_intercept_failover.instance_name | default('openwrt-transport-failover') }}.state"
-    openwrt_xp2p_three_x_ui_intercept_failover_backup_file: "{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json.failover-base"
+    openwrt_transport_failover_intercept_failover_enabled: "{{ openwrt_transport_failover_intercept_enabled | bool and openwrt_transport_failover_intercept_failover.enabled | default(false) | bool }}"
+    openwrt_transport_failover_intercept_failover_service_enabled: "{{ openwrt_transport_failover_intercept_failover.service_enabled | default(true) | bool }}"
+    openwrt_transport_failover_intercept_failover_instance_name: "{{ openwrt_transport_failover_intercept_failover.instance_name | default('openwrt-transport-failover') }}"
+    openwrt_transport_failover_intercept_failover_script_path: "{{ openwrt_transport_failover_intercept_failover.script_path | default('/usr/local/sbin/openwrt-transport-failover') }}"
+    openwrt_transport_failover_intercept_failover_service_path: "{{ openwrt_transport_failover_intercept_failover.service_path | default('/etc/init.d/openwrt-transport-failover') }}"
+    openwrt_transport_failover_intercept_failover_legacy_script_path: /usr/local/sbin/xp2pc-lan-intercept-failover
+    openwrt_transport_failover_intercept_failover_legacy_service_path: /etc/init.d/xp2pc-lan-intercept-failover
+    openwrt_transport_failover_intercept_failover_interval_seconds: "{{ openwrt_transport_failover_intercept_failover.interval_seconds | default(10) }}"
+    openwrt_transport_failover_intercept_failover_dead_after_failures: "{{ openwrt_transport_failover_intercept_failover.dead_after_failures | default(3) }}"
+    openwrt_transport_failover_intercept_failover_restore_after_successes: "{{ openwrt_transport_failover_intercept_failover.restore_after_successes | default(3) }}"
+    openwrt_transport_failover_intercept_failover_disable_intercept_when_dead: "{{ openwrt_transport_failover_intercept_failover.disable_intercept_when_dead | default(true) }}"
+    openwrt_transport_failover_intercept_failover_restore_intercept_when_alive: "{{ openwrt_transport_failover_intercept_failover.restore_intercept_when_alive | default(true) }}"
+    openwrt_transport_failover_intercept_failover_use_socks_smoke: "{{ openwrt_transport_failover_intercept_failover.use_socks_smoke | default(true) }}"
+    openwrt_transport_failover_intercept_failover_proxy_outbound_tag: "{{ openwrt_transport_failover_routing.proxy_outbound_tag }}"
+    openwrt_transport_failover_intercept_failover_interface: "{{ openwrt_transport_failover_routing.intercept.interface | default('xp2pc') }}"
+    openwrt_transport_failover_intercept_failover_table: "{{ openwrt_transport_failover_routing.intercept.table | default('100') }}"
+    openwrt_transport_failover_intercept_failover_rule_section: "{{ openwrt_transport_failover_routing.intercept.rule_section | default('xp2pc_lan_intercept') }}"
+    openwrt_transport_failover_intercept_failover_route_section: "{{ openwrt_transport_failover_routing.intercept.route_section | default('xp2pc_lan_intercept_default') }}"
+    openwrt_transport_failover_intercept_failover_socks_port: "{{ openwrt_transport_failover_routing.socks_port }}"
+    openwrt_transport_failover_intercept_failover_routing_file: "{{ openwrt_transport_failover_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json"
+    openwrt_transport_failover_intercept_failover_state_file: "/var/lib/openwrt-transport-failover/{{ openwrt_transport_failover_intercept_failover.instance_name | default('openwrt-transport-failover') }}.state"
+    openwrt_transport_failover_intercept_failover_backup_file: "{{ openwrt_transport_failover_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json.failover-base"
     openwrt_route_control_runtime_helper_path: /usr/libexec/openwrt-route-control-runtime
     openwrt_transport_failover_candidates: "{{ openwrt_transport_candidates }}"
 
-- name: Validate 3x-ui OpenWrt LAN intercept failover model
+- name: Validate OpenWrt transport LAN intercept failover model
   ansible.builtin.assert:
     that:
-      - openwrt_xp2p_three_x_ui_intercept_enabled | bool
-      - openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
-      - openwrt_xp2p_three_x_ui_intercept_failover_proxy_outbound_tag | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_interface | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_table | string | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_rule_section | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_interval_seconds | int > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures | int > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes | int > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_script_path | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_service_path | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_routing_file | length > 0
-      - openwrt_xp2p_three_x_ui_intercept_failover_state_file | length > 0
+      - openwrt_transport_failover_intercept_enabled | bool
+      - openwrt_transport_failover_intercept_failover_enabled | bool
+      - openwrt_transport_failover_intercept_failover_proxy_outbound_tag | length > 0
+      - openwrt_transport_failover_intercept_failover_interface | length > 0
+      - openwrt_transport_failover_intercept_failover_table | string | length > 0
+      - openwrt_transport_failover_intercept_failover_rule_section | length > 0
+      - openwrt_transport_failover_intercept_failover_interval_seconds | int > 0
+      - openwrt_transport_failover_intercept_failover_dead_after_failures | int > 0
+      - openwrt_transport_failover_intercept_failover_restore_after_successes | int > 0
+      - openwrt_transport_failover_intercept_failover_script_path | length > 0
+      - openwrt_transport_failover_intercept_failover_service_path | length > 0
+      - openwrt_transport_failover_intercept_failover_routing_file | length > 0
+      - openwrt_transport_failover_intercept_failover_state_file | length > 0
       - >-
-        not (openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool)
+        not (openwrt_transport_failover_intercept_failover_use_socks_smoke | bool)
         or (
-          openwrt_xp2p_three_x_ui_intercept_failover_socks_probes | length > 0
-          and openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int > 0
-          and openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int
-            <= openwrt_xp2p_three_x_ui_intercept_failover_socks_probes | length
+          openwrt_transport_failover_intercept_failover_socks_probes | length > 0
+          and openwrt_transport_failover_intercept_failover_required_probe_successes | int > 0
+          and openwrt_transport_failover_intercept_failover_required_probe_successes | int
+            <= openwrt_transport_failover_intercept_failover_socks_probes | length
         )
-    fail_msg: "3x-ui OpenWrt LAN intercept failover model is incomplete for {{ inventory_hostname }}."
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+    fail_msg: "OpenWrt transport LAN intercept failover model is incomplete for {{ inventory_hostname }}."
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Build 3x-ui OpenWrt LAN intercept failover script and procd service
+- name: Build OpenWrt transport LAN intercept failover script and procd service
   ansible.builtin.set_fact:
-    openwrt_xp2p_three_x_ui_intercept_failover_script_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.sh.j2') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_service_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.init.j2') }}"
-    openwrt_xp2p_three_x_ui_intercept_failover_script_chunks: >-
+    openwrt_transport_failover_intercept_failover_script_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.sh.j2') }}"
+    openwrt_transport_failover_intercept_failover_service_content: "{{ lookup('ansible.builtin.template', 'openwrt-transport-failover.init.j2') }}"
+    openwrt_transport_failover_intercept_failover_script_chunks: >-
       {{
         lookup('ansible.builtin.template', 'openwrt-transport-failover.sh.j2')
         | list
@@ -75,13 +75,13 @@
         | map('join')
         | list
       }}
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Remove legacy 3x-ui-named OpenWrt transport failover artifacts
+- name: Remove legacy OpenWrt transport failover artifacts
   ansible.builtin.raw: |
     changed=false
-    legacy_service='{{ openwrt_xp2p_three_x_ui_intercept_failover_legacy_service_path }}'
-    legacy_script='{{ openwrt_xp2p_three_x_ui_intercept_failover_legacy_script_path }}'
+    legacy_service='{{ openwrt_transport_failover_intercept_failover_legacy_service_path }}'
+    legacy_script='{{ openwrt_transport_failover_intercept_failover_legacy_script_path }}'
     if [ -x "$legacy_service" ]; then
       "$legacy_service" stop >/dev/null 2>&1 || true
       "$legacy_service" disable >/dev/null 2>&1 || true
@@ -93,28 +93,28 @@
       changed=true
     fi
     echo "changed=$changed"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_legacy_cleanup
-  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_legacy_cleanup.stdout"
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+  register: openwrt_transport_failover_intercept_failover_legacy_cleanup
+  changed_when: "'changed=true' in openwrt_transport_failover_intercept_failover_legacy_cleanup.stdout"
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Install 3x-ui OpenWrt LAN intercept failover script
+- name: Install OpenWrt transport LAN intercept failover script
   ansible.builtin.raw: |
-    tmp='/tmp/{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}.ansible'
+    tmp='/tmp/{{ openwrt_transport_failover_intercept_failover_instance_name }}.ansible'
     if [ '{{ script_chunk_index }}' = 0 ]; then : > "$tmp"; fi
     printf '%s' {{ item | quote }} >> "$tmp"
-  loop: "{{ openwrt_xp2p_three_x_ui_intercept_failover_script_chunks }}"
+  loop: "{{ openwrt_transport_failover_intercept_failover_script_chunks }}"
   loop_control:
     index_var: script_chunk_index
     label: "script chunk {{ script_chunk_index + 1 }}"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_script_chunks_result
+  register: openwrt_transport_failover_intercept_failover_script_chunks_result
   changed_when: false
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Activate 3x-ui OpenWrt LAN intercept failover script
+- name: Activate OpenWrt transport LAN intercept failover script
   ansible.builtin.raw: |
     changed=false
-    target='{{ openwrt_xp2p_three_x_ui_intercept_failover_script_path }}'
-    tmp='/tmp/{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}.ansible'
+    target='{{ openwrt_transport_failover_intercept_failover_script_path }}'
+    tmp='/tmp/{{ openwrt_transport_failover_intercept_failover_instance_name }}.ansible'
     mkdir -p "$(dirname "$target")"
     chmod 0755 "$tmp"
     if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
@@ -124,18 +124,18 @@
       rm -f "$tmp"
     fi
     echo "changed=$changed"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_install
-  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_install.stdout"
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+  register: openwrt_transport_failover_intercept_failover_install
+  changed_when: "'changed=true' in openwrt_transport_failover_intercept_failover_install.stdout"
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Install 3x-ui OpenWrt LAN intercept failover procd service
+- name: Install OpenWrt transport LAN intercept failover procd service
   ansible.builtin.raw: |
     changed=false
-    target='{{ openwrt_xp2p_three_x_ui_intercept_failover_service_path }}'
-    tmp='/tmp/{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}.init.ansible'
+    target='{{ openwrt_transport_failover_intercept_failover_service_path }}'
+    tmp='/tmp/{{ openwrt_transport_failover_intercept_failover_instance_name }}.init.ansible'
     mkdir -p "$(dirname "$target")"
     cat > "$tmp" <<'__ANSIBLE_XP2PC_LAN_INTERCEPT_FAILOVER_INIT__'
-    {{ openwrt_xp2p_three_x_ui_intercept_failover_service_content }}
+    {{ openwrt_transport_failover_intercept_failover_service_content }}
     __ANSIBLE_XP2PC_LAN_INTERCEPT_FAILOVER_INIT__
     chmod 0755 "$tmp"
     if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
@@ -145,20 +145,20 @@
       rm -f "$tmp"
     fi
     echo "changed=$changed"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_service_install
-  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_service_install.stdout"
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+  register: openwrt_transport_failover_intercept_failover_service_install
+  changed_when: "'changed=true' in openwrt_transport_failover_intercept_failover_service_install.stdout"
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Enable and start 3x-ui OpenWrt LAN intercept failover procd service
+- name: Enable and start OpenWrt transport LAN intercept failover procd service
   ansible.builtin.raw: |
     changed=false
-    service_path='{{ openwrt_xp2p_three_x_ui_intercept_failover_service_path }}'
+    service_path='{{ openwrt_transport_failover_intercept_failover_service_path }}'
     if ! "$service_path" enabled >/dev/null 2>&1; then
       "$service_path" enable
       changed=true
     fi
-    if [ '{{ openwrt_xp2p_three_x_ui_intercept_failover_install.changed | bool | lower }}' = 'true' ] ||
-       [ '{{ openwrt_xp2p_three_x_ui_intercept_failover_service_install.changed | bool | lower }}' = 'true' ]; then
+    if [ '{{ openwrt_transport_failover_intercept_failover_install.changed | bool | lower }}' = 'true' ] ||
+       [ '{{ openwrt_transport_failover_intercept_failover_service_install.changed | bool | lower }}' = 'true' ]; then
       "$service_path" restart
       changed=true
     elif ! "$service_path" running >/dev/null 2>&1; then
@@ -166,16 +166,16 @@
       changed=true
     fi
     echo "changed=$changed"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_service_start
-  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_service_start.stdout"
+  register: openwrt_transport_failover_intercept_failover_service_start
+  changed_when: "'changed=true' in openwrt_transport_failover_intercept_failover_service_start.stdout"
   when:
-    - openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
-    - openwrt_xp2p_three_x_ui_intercept_failover_service_enabled | bool
+    - openwrt_transport_failover_intercept_failover_enabled | bool
+    - openwrt_transport_failover_intercept_failover_service_enabled | bool
 
 - name: Remove obsolete failover runtime state from the XP2P watched config directory
   ansible.builtin.raw: |
     changed=false
-    legacy_state='{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/.transport-failover-state'
+    legacy_state='{{ openwrt_transport_failover_routing.remote_config_dir }}/.transport-failover-state'
     legacy_lock="${legacy_state}.lock"
     if [ -f "$legacy_state" ]; then
       rm -f "$legacy_state"
@@ -186,14 +186,14 @@
       [ ! -d "$legacy_lock" ] && changed=true
     fi
     echo "changed=$changed"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_legacy_lock_cleanup
-  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_legacy_lock_cleanup.stdout"
-  when: openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool
+  register: openwrt_transport_failover_intercept_failover_legacy_lock_cleanup
+  changed_when: "'changed=true' in openwrt_transport_failover_intercept_failover_legacy_lock_cleanup.stdout"
+  when: openwrt_transport_failover_intercept_failover_enabled | bool
 
-- name: Stop and disable 3x-ui OpenWrt LAN intercept failover procd service
+- name: Stop and disable OpenWrt transport LAN intercept failover procd service
   ansible.builtin.raw: |
     changed=false
-    service_path='{{ openwrt_xp2p_three_x_ui_intercept_failover_service_path }}'
+    service_path='{{ openwrt_transport_failover_intercept_failover_service_path }}'
     if [ -x "$service_path" ]; then
       if "$service_path" running >/dev/null 2>&1; then
         "$service_path" stop || true
@@ -205,6 +205,6 @@
       fi
     fi
     echo "changed=$changed"
-  register: openwrt_xp2p_three_x_ui_intercept_failover_service_stop
-  changed_when: "'changed=true' in openwrt_xp2p_three_x_ui_intercept_failover_service_stop.stdout"
-  when: not (openwrt_xp2p_three_x_ui_intercept_failover_enabled | bool and openwrt_xp2p_three_x_ui_intercept_failover_service_enabled | bool)
+  register: openwrt_transport_failover_intercept_failover_service_stop
+  changed_when: "'changed=true' in openwrt_transport_failover_intercept_failover_service_stop.stdout"
+  when: not (openwrt_transport_failover_intercept_failover_enabled | bool and openwrt_transport_failover_intercept_failover_service_enabled | bool)

@@ -2,26 +2,26 @@
 # Managed by Ansible. Generic OpenWrt transport failover dataplane owner.
 set -u
 
-instance_name='{{ openwrt_xp2p_three_x_ui_intercept_failover_instance_name }}'
+instance_name='{{ openwrt_transport_failover_intercept_failover_instance_name }}'
 log_tag="$instance_name"
-transport_interface='{{ openwrt_xp2p_three_x_ui_intercept_failover_interface }}'
-route_table='{{ openwrt_xp2p_three_x_ui_intercept_failover_table }}'
-rule_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_rule_section }}'
-route_section='{{ openwrt_xp2p_three_x_ui_intercept_failover_route_section }}'
-routing_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_routing_file }}'
-state_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_state_file }}'
-backup_file='{{ openwrt_xp2p_three_x_ui_intercept_failover_backup_file }}'
+transport_interface='{{ openwrt_transport_failover_intercept_failover_interface }}'
+route_table='{{ openwrt_transport_failover_intercept_failover_table }}'
+rule_section='{{ openwrt_transport_failover_intercept_failover_rule_section }}'
+route_section='{{ openwrt_transport_failover_intercept_failover_route_section }}'
+routing_file='{{ openwrt_transport_failover_intercept_failover_routing_file }}'
+state_file='{{ openwrt_transport_failover_intercept_failover_state_file }}'
+backup_file='{{ openwrt_transport_failover_intercept_failover_backup_file }}'
 route_control_helper='{{ openwrt_route_control_runtime_helper_path }}'
 # Keep the execution lock outside XP2P's watched config directory. XP2P treats
 # any file or directory change below config-client as a runtime configuration
 # change, so a failover lock there can cancel an in-progress TUN reconciliation.
 lock_dir="/var/run/${instance_name}.lock"
-dead_after_failures='{{ openwrt_xp2p_three_x_ui_intercept_failover_dead_after_failures | int }}'
-restore_after_successes='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_after_successes | int }}'
-disable_intercept_when_dead='{{ openwrt_xp2p_three_x_ui_intercept_failover_disable_intercept_when_dead | bool | lower }}'
-restore_intercept_when_alive='{{ openwrt_xp2p_three_x_ui_intercept_failover_restore_intercept_when_alive | bool | lower }}'
-use_socks_smoke='{{ openwrt_xp2p_three_x_ui_intercept_failover_use_socks_smoke | bool | lower }}'
-socks_port='{{ openwrt_xp2p_three_x_ui_intercept_failover_socks_port | int }}'
+dead_after_failures='{{ openwrt_transport_failover_intercept_failover_dead_after_failures | int }}'
+restore_after_successes='{{ openwrt_transport_failover_intercept_failover_restore_after_successes | int }}'
+disable_intercept_when_dead='{{ openwrt_transport_failover_intercept_failover_disable_intercept_when_dead | bool | lower }}'
+restore_intercept_when_alive='{{ openwrt_transport_failover_intercept_failover_restore_intercept_when_alive | bool | lower }}'
+use_socks_smoke='{{ openwrt_transport_failover_intercept_failover_use_socks_smoke | bool | lower }}'
+socks_port='{{ openwrt_transport_failover_intercept_failover_socks_port | int }}'
 candidate_tags_json='{{ openwrt_transport_failover_candidates
   | selectattr("type", "equalto", "xp2p_xray")
   | map(attribute="outbound_tag")
