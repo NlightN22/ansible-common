@@ -84,6 +84,19 @@
       or xp2p_dat_refresh_remote_parts[1] != xp2p_dat_refresh_local_stat.checksum
     )
 
+- name: Refresh remote XP2P dat mtime when content is current
+  ansible.builtin.raw: |
+    file='{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}'
+    if [ -s "$file" ] && find "$file" -type f -mtime '+{{ xp2p_dat_refresh_model.dat_max_age_days | default(xp2p_dat_refresh_max_age_days) | int }}' -print | grep -F "$file" >/dev/null; then
+      touch "$file"
+      echo "$file"
+    fi
+  register: xp2p_dat_refresh_remote_mtime_sync
+  changed_when: xp2p_dat_refresh_remote_mtime_sync.stdout | trim | length > 0
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 - name: Validate remote XP2P dat files
   ansible.builtin.raw: "test -s '{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}'"
   changed_when: false

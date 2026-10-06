@@ -32,70 +32,73 @@
   loop: "{{ openwrt_xp2p_three_x_ui_routing.dat_files }}"
 
 - name: Check 3x-ui OpenWrt routing state
-  ansible.builtin.raw: |
-    set -eu
-    command -v xp2p >/dev/null
-    routing_file='{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
-    /etc/init.d/xp2p-client enabled >/dev/null
-    /etc/init.d/xp2p-client running >/dev/null
-    for file in {% for dat_file in openwrt_xp2p_three_x_ui_routing.dat_files %}'{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ dat_file.name }}' {% endfor %}; do
-      test -s "$file"
-    done
-    test -s "$routing_file"
-    command -v jq >/dev/null
-    jq empty "$routing_file"
-    grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' "$routing_file" >/dev/null
-    {% set routing_ns = namespace(domains=[], ipv4_cidrs=[]) %}
-    {% for route in openwrt_xp2p_three_x_ui_proxy_routes %}
-    {% set routing_ns.domains = routing_ns.domains + (route.domains | default([route.fqdn] if route.fqdn is defined else [])) %}
-    {% set routing_ns.ipv4_cidrs = routing_ns.ipv4_cidrs + (route.ipv4_cidrs | default([route.expected_ipv4 ~ '/32'] if route.expected_ipv4 is defined else [])) %}
-    {% endfor %}
-    {% set route_domains = routing_ns.domains | reject('equalto', '') | unique | list %}
-    {% set route_ipv4_cidrs = routing_ns.ipv4_cidrs | reject('equalto', '') | unique | list %}
-    {% for domain in route_domains %}
-    if ! grep -F -- '"{{ domain }}"' "$routing_file" >/dev/null 2>&1 &&
-       ! grep -F -- '"full:{{ domain }}"' "$routing_file" >/dev/null 2>&1; then
-      echo "ROUTING_DOMAIN_MISSING domain={{ domain }} outbound={{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
-      exit 1
-    fi
-    {% endfor %}
-    {% for cidr in route_ipv4_cidrs %}
-    if ! grep -F -- '"{{ cidr }}"' "$routing_file" >/dev/null 2>&1; then
-      echo "ROUTING_CIDR_MISSING cidr={{ cidr }} outbound={{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
-      exit 1
-    fi
-    {% endfor %}
-    direct_outbound_tag='{{ openwrt_xp2p_three_x_ui_routing.xray_direct_outbound_tag | default("direct") }}'
-    {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
-    if ! grep -F -- '"{{ cidr }}"' "$routing_file" >/dev/null 2>&1; then
-      echo "ROUTING_DIRECT_CIDR_MISSING cidr={{ cidr }} outbound=${direct_outbound_tag}"
-      exit 1
-    fi
-    {% endfor %}
-    {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
-    jq -e --arg direct_tag "$direct_outbound_tag" \
-      --arg proxy_tag '{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}' \
-      --arg direct_cidr '{{ cidr }}' \
-      '(.rules | type == "array") and
-       (([.[] | to_entries[] |
-          select(.value.outboundTag == $direct_tag and
-                 ((.value.ip // []) | index($direct_cidr))) |
-          .key] | min) <
-        ([.[] | to_entries[] |
-          select(.value.outboundTag == $proxy_tag) |
-          .key] | min))' "$routing_file" >/dev/null
-    {% endfor %}
-    if [ '{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs | length }}' -gt 0 ] &&
-       ! grep -F -- '"outboundTag": "'"$direct_outbound_tag"'"' "$routing_file" >/dev/null 2>&1; then
-      echo "ROUTING_DIRECT_OUTBOUND_MISSING outbound=${direct_outbound_tag}"
-      exit 1
-    fi
-    grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' "$routing_file" >/dev/null
-    grep -F '"network": "tcp,udp"' "$routing_file" >/dev/null
-    if ! grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"' "$routing_file" >/dev/null 2>&1; then
-      echo "ROUTING_FINAL_OUTBOUND_MISMATCH expected={{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}"
-      exit 1
-    fi
+  community.openwrt.command:
+    cmd: |
+      set -eu
+      command -v xp2p >/dev/null
+      routing_file='{{ openwrt_xp2p_three_x_ui_routing.remote_config_dir }}/routing.rules.after-xp2p-managed.json'
+      /etc/init.d/xp2p-client enabled >/dev/null
+      /etc/init.d/xp2p-client running >/dev/null
+      for file in {% for dat_file in openwrt_xp2p_three_x_ui_routing.dat_files %}'{{ openwrt_xp2p_three_x_ui_routing.remote_dat_dir }}/{{ dat_file.name }}' {% endfor %}; do
+        test -s "$file"
+      done
+      test -s "$routing_file"
+      command -v jq >/dev/null
+      jq empty "$routing_file"
+      grep -F -- '{{ openwrt_xp2p_three_x_ui_routing.proxy_outbound_tag }}' "$routing_file" >/dev/null
+      {% set routing_ns = namespace(domains=[], ipv4_cidrs=[]) %}
+      {% for route in openwrt_xp2p_three_x_ui_proxy_routes %}
+      {% set routing_ns.domains = routing_ns.domains + (route.domains | default([route.fqdn] if route.fqdn is defined else [])) %}
+      {% set routing_ns.ipv4_cidrs = routing_ns.ipv4_cidrs + (route.ipv4_cidrs | default([route.expected_ipv4 ~ '/32'] if route.expected_ipv4 is defined else [])) %}
+      {% endfor %}
+      {% set route_domains = routing_ns.domains | reject('equalto', '') | unique | list %}
+      {% set route_ipv4_cidrs = routing_ns.ipv4_cidrs | reject('equalto', '') | unique | list %}
+      {% for domain in route_domains %}
+      if ! grep -F -- '"{{ domain }}"' "$routing_file" >/dev/null 2>&1 &&
+         ! grep -F -- '"full:{{ domain }}"' "$routing_file" >/dev/null 2>&1; then
+        echo "ROUTING_DOMAIN_MISSING domain={{ domain }} outbound={{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
+        exit 1
+      fi
+      {% endfor %}
+      {% for cidr in route_ipv4_cidrs %}
+      if ! grep -F -- '"{{ cidr }}"' "$routing_file" >/dev/null 2>&1; then
+        echo "ROUTING_CIDR_MISSING cidr={{ cidr }} outbound={{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"
+        exit 1
+      fi
+      {% endfor %}
+      direct_outbound_tag='{{ openwrt_xp2p_three_x_ui_routing.xray_direct_outbound_tag | default("direct") }}'
+      {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
+      if ! grep -F -- '"{{ cidr }}"' "$routing_file" >/dev/null 2>&1; then
+        echo "ROUTING_DIRECT_CIDR_MISSING cidr={{ cidr }} outbound=${direct_outbound_tag}"
+        exit 1
+      fi
+      {% endfor %}
+      {% for cidr in openwrt_xp2p_three_x_ui_xray_direct_cidrs %}
+      jq -e --arg direct_tag "$direct_outbound_tag" \
+        --arg proxy_tag '{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}' \
+        --arg direct_cidr '{{ cidr }}' \
+        '(.rules | type == "array") and
+         (([.[] | to_entries[] |
+            select(.value.outboundTag == $direct_tag and
+                   ((.value.ip // []) | index($direct_cidr))) |
+            .key] | min) <
+          ([.[] | to_entries[] |
+            select(.value.outboundTag == $proxy_tag) |
+            .key] | min))' "$routing_file" >/dev/null
+      {% endfor %}
+      if [ '{{ openwrt_xp2p_three_x_ui_xray_direct_cidrs | length }}' -gt 0 ] &&
+         ! grep -F -- "\"outboundTag\": \"${direct_outbound_tag}\"" "$routing_file" >/dev/null 2>&1; then
+        echo "ROUTING_DIRECT_OUTBOUND_MISSING outbound=${direct_outbound_tag}"
+        exit 1
+      fi
+      grep -F '"outboundTag": "{{ openwrt_xp2p_three_x_ui_proxy_route_outbound_tag }}"' "$routing_file" >/dev/null
+      grep -F '"network": "tcp,udp"' "$routing_file" >/dev/null
+      final_outbound_tag='{{ openwrt_xp2p_three_x_ui_routing.final_outbound_tag | default("direct") }}'
+      if ! grep -F -- "\"outboundTag\": \"${final_outbound_tag}\"" "$routing_file" >/dev/null 2>&1; then
+        echo "ROUTING_FINAL_OUTBOUND_MISMATCH expected=${final_outbound_tag}"
+        exit 1
+      fi
+    uses_shell: true
   register: openwrt_xp2p_three_x_ui_routing_state_healthcheck
   changed_when: false
   failed_when: false
