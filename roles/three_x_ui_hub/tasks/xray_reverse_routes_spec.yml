@@ -80,3 +80,22 @@
     - three_x_ui_hub_star.xray_direct_candidate_routes is defined
     - three_x_ui_hub_star.xray_direct_candidate_routes.domains | default([]) | length > 0
     - three_x_ui_hub_star.xray_direct_candidate_routes.ipv4_cidrs | default([]) | length > 0
+
+- name: Add declared proxy routes for external destination networks
+  ansible.builtin.set_fact:
+    three_x_ui_hub_xray_routes: >-
+      {{
+        three_x_ui_hub_xray_routes
+        + [
+          {
+            'state': 'present',
+            'type': 'field',
+            'outboundTag': three_x_ui_hub_star.xray_proxy_candidate_routes.outbound_tag,
+            'ip': three_x_ui_hub_star.xray_proxy_candidate_routes.ipv4_cidrs
+          }
+        ]
+      }}
+  when:
+    - three_x_ui_hub_star.xray_proxy_candidate_routes is defined
+    - three_x_ui_hub_star.xray_proxy_candidate_routes.outbound_tag | default('') | length > 0
+    - three_x_ui_hub_star.xray_proxy_candidate_routes.ipv4_cidrs | default([]) | length > 0
