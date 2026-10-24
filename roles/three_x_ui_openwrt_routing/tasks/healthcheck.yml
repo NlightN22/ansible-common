@@ -151,6 +151,16 @@
     [ "$test_port" = "$test_host" ] && test_port=443
     resolve_args="--resolve ${test_host}:${test_port}:{{ check.destination_ipv4 | first }}"
     {% endif %}
+    {% if check.expected_status | default(0) | int > 0 %}
+    # shellcheck disable=SC2086
+    actual_http_status="$(curl $resolve_args -sS -L --connect-timeout 8 --max-time 30 \
+      -o /dev/null -w '%{http_code}' "$test_url" || true)"
+    if [ "$actual_http_status" != '{{ check.expected_status }}' ]; then
+      echo "LAN_PROBE_HTTP_STATUS_MISMATCH check=$test_name url=$test_url expected={{ check.expected_status }} actual=${actual_http_status:-<empty>}"
+      exit 1
+    fi
+    continue
+    {% endif %}
     # shellcheck disable=SC2086
     actual_egress_ip="$(curl $resolve_args -fsS --connect-timeout 8 --max-time 30 "$test_url" |
       grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
@@ -462,6 +472,15 @@
     forbidden_egress_ips="$(printf '%s\n' {% for ip in check.forbidden_public_ips | default([]) %}'{{ ip }}' {% endfor %}{% for host in check.forbidden_public_ip_hosts | default([]) %}{% set resolved_host = inventory_hostname if host == "self" else host %}'{{ ((management_generated_model.management_discovered | default({})).get(resolved_host, {}).public.current_public_ip) | default(hostvars[resolved_host].current_public_ip | default("")) }}' {% endfor %} | sed '/^$/d' | sort -u)"
     test_name='{{ check.name | default(check.url) }}'
     test_url='{{ check.url }}'
+    {% if check.expected_status | default(0) | int > 0 %}
+    actual_http_status="$(curl --socks5-hostname 127.0.0.1:{{ openwrt_xp2p_three_x_ui_routing.socks_port | int }} \
+      -sS -L --connect-timeout 8 --max-time 30 -o /dev/null -w '%{http_code}' "$test_url" || true)"
+    if [ "$actual_http_status" != '{{ check.expected_status }}' ]; then
+      echo "SOCKS_HTTP_STATUS_MISMATCH check=$test_name url=$test_url expected={{ check.expected_status }} actual=${actual_http_status:-<empty>}"
+      exit 1
+    fi
+    continue
+    {% endif %}
     actual_egress_ip=''
     actual_egress_error=''
     for attempt in 1 2 3; do

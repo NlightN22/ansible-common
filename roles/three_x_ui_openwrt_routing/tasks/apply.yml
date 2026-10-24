@@ -213,11 +213,15 @@
     probe_successes=0
     {% for probe in openwrt_xp2p_three_x_ui_intercept_failover_socks_probes %}
     probe_output=$(curl --socks5-hostname 127.0.0.1:{{ openwrt_xp2p_three_x_ui_routing.socks_port | int }} \
-      -fsS --connect-timeout 3 --max-time 5 '{{ probe.url }}' 2>/dev/null | tr -d '\r\n' || true)
+      -sS -L --connect-timeout 3 --max-time 8 -w '\n__HTTP_STATUS__=%{http_code}' '{{ probe.url }}' 2>/dev/null || true)
+    probe_http_status=$(printf '%s\n' "$probe_output" | sed -n 's/^__HTTP_STATUS__=//p' | tail -n 1)
+    probe_body=$(printf '%s\n' "$probe_output" | sed '/^__HTTP_STATUS__=/d' | tr -d '\r\n')
     {% if probe.expected_public_ip is defined %}
-    [ "$probe_output" = '{{ probe.expected_public_ip }}' ] && probe_successes=$((probe_successes + 1))
+    [ "$probe_body" = '{{ probe.expected_public_ip }}' ] && probe_successes=$((probe_successes + 1))
+    {% elif probe.expected_status is defined %}
+    [ "$probe_http_status" = '{{ probe.expected_status }}' ] && probe_successes=$((probe_successes + 1))
     {% else %}
-    [ -n "$probe_output" ] && probe_successes=$((probe_successes + 1))
+    [ -n "$probe_body" ] && probe_successes=$((probe_successes + 1))
     {% endif %}
     {% endfor %}
     test "$probe_successes" -ge '{{ openwrt_xp2p_three_x_ui_intercept_failover_required_probe_successes | int }}'

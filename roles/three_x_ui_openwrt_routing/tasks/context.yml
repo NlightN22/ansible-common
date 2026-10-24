@@ -102,7 +102,8 @@
         + [{
             'name': item.id,
             'url': item.url,
-            'expected_public_ip': item.expected_public_ip,
+            'expected_public_ip': item.expected_public_ip | default(''),
+            'expected_status': item.expected_status | default(0),
             'destination_ipv4': item.destination_ipv4 | default([])
           }]
       }}
@@ -344,6 +345,7 @@
       - >-
         openwrt_xp2p_three_x_ui_routing.socks_egress_checks
         | selectattr('expected_public_ip', 'defined')
+        | rejectattr('expected_public_ip', 'equalto', '')
         | list
         | length
         +
@@ -354,6 +356,12 @@
         +
         openwrt_xp2p_three_x_ui_routing.socks_egress_checks
         | selectattr('expected_country', 'defined')
+        | list
+        | length
+        +
+        openwrt_xp2p_three_x_ui_routing.socks_egress_checks
+        | selectattr('expected_status', 'defined')
+        | selectattr('expected_status', 'greaterthan', 0)
         | list
         | length
         == openwrt_xp2p_three_x_ui_routing.socks_egress_checks | length

@@ -70,15 +70,16 @@ transport_enabled() {
 }
 
 socks_probe() {
-  expected_ip="$1"
-  probe_urls="$2"
-  probe_destinations="$3"
+  probe_urls="$1"
+  probe_destinations="$2"
+  probe_expectations="$3"
   required_successes="$4"
   [ "$use_socks_smoke" = "true" ] || return 0
   probe_successes=0
   probe_index=1
   for probe_url in $(printf '%s' "$probe_urls" | tr '|' ' '); do
     destination_ipv4="$(printf '%s' "$probe_destinations" | cut -d '|' -f "$probe_index")"
+    probe_expectation="$(printf '%s' "$probe_expectations" | cut -d '|' -f "$probe_index")"
     authority="${probe_url#*://}"
     authority="${authority%%/*}"
     probe_host="${authority%%:*}"
@@ -87,9 +88,14 @@ socks_probe() {
     resolve_args=''
     [ -n "$destination_ipv4" ] && resolve_args="--resolve ${probe_host}:${probe_port}:${destination_ipv4}"
     # shellcheck disable=SC2086
-    probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" $resolve_args -fsS --connect-timeout 3 --max-time 8 \
-      "$probe_url" 2>/dev/null | tr -d '\r\n' || true)"
-    [ "$probe_output" = "$expected_ip" ] && probe_successes=$((probe_successes + 1))
+    probe_output="$(curl --socks5-hostname "127.0.0.1:${socks_port}" $resolve_args -sS -L --connect-timeout 3 --max-time 8 \
+      -w '\n__HTTP_STATUS__=%{http_code}' "$probe_url" 2>/dev/null || true)"
+    actual_status="$(printf '%s\n' "$probe_output" | sed -n 's/^__HTTP_STATUS__=//p' | tail -n 1)"
+    probe_body="$(printf '%s\n' "$probe_output" | sed '/^__HTTP_STATUS__=/d' | tr -d '\r\n')"
+    case "$probe_expectation" in
+      ip:*) [ "$probe_body" = "${probe_expectation#ip:}" ] && probe_successes=$((probe_successes + 1)) ;;
+      status:*) [ "$actual_status" = "${probe_expectation#status:}" ] && probe_successes=$((probe_successes + 1)) ;;
+    esac
     probe_index=$((probe_index + 1))
   done
   [ "$probe_successes" -ge "$required_successes" ]
@@ -135,6 +141,7 @@ candidate_healthy() {
   required_successes="$7"
   expected_country="$8"
   peer_public_key="$9"
+  probe_expectations="${10}"
   if [ "$candidate_type" = wan_direct ]; then
     wan_probe "$probe_urls" "$probe_destinations" "$required_successes" "$expected_country"
     return $?
@@ -150,7 +157,7 @@ candidate_healthy() {
     fi
     [ "$(transport_status "$candidate_tag")" = healthy ] ||
       [ "$(transport_status "$candidate_tag")" = alive ] || return 1
-    socks_probe "$expected_ip" "$probe_urls" "$probe_destinations" "$required_successes"
+    socks_probe "$probe_urls" "$probe_destinations" "$probe_expectations" "$required_successes"
     return $?
   fi
   if [ "$candidate_type" = wireguard ]; then
@@ -253,6 +260,7 @@ switch_routing_outbound() {
   probe_urls="$3"
   probe_destinations="$4"
   required_successes="$5"
+  probe_expectations="$6"
   current_tag="$(routing_active_xray_outbound)"
   [ -n "$current_tag" ] || current_tag="$(active_transport)"
   [ "$current_tag" = "$desired_tag" ] && return 0
@@ -270,7 +278,7 @@ switch_routing_outbound() {
     return 1
   fi
   sleep 30
-  if ! socks_probe "$expected_ip" "$probe_urls" "$probe_destinations" "$required_successes"; then
+  if ! socks_probe "$probe_urls" "$probe_destinations" "$probe_expectations" "$required_successes"; then
     mv "$rollback_file" "$routing_file"
     xp2p client service restart >/dev/null 2>&1 || true
     sleep 30
@@ -304,7 +312,7 @@ enable_intercept_rule() {
 
 select_transport() {
 {% for candidate in openwrt_transport_failover_candidates %}
-  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}' '{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in candidate.probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ candidate.probe_policy.required_successes | default(1) | int }}' '{{ candidate.probes | selectattr("expected_country", "defined") | map(attribute="expected_country") | first | default("") }}' '{{ candidate.endpoint.peer_public_key | default("") }}'; then
+  if candidate_healthy '{{ candidate.type }}' '{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}' '{{ candidate.expected_public_ip | default(candidate.endpoint.host | default('')) }}' '{{ candidate.dataplane.independent_egress_probe | default(false) | lower }}' '{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in candidate.probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ candidate.probe_policy.required_successes | default(1) | int }}' '{{ candidate.probes | selectattr("expected_country", "defined") | map(attribute="expected_country") | first | default("") }}' '{{ candidate.endpoint.peer_public_key | default("") }}' '{% for probe in candidate.probes | default([]) %}{{ ('ip:' ~ probe.expected_public_ip) if probe.expected_public_ip is defined else (('status:' ~ probe.expected_status) if probe.expected_status is defined else '') }}{% if not loop.last %}|{% endif %}{% endfor %}'; then
     printf '%s\n' '{{ candidate.id }}|{{ candidate.type }}|{{ candidate.outbound_tag | default(candidate.dataplane.interface | default('')) }}'
     return 0
   fi
@@ -323,7 +331,7 @@ current_transport="$(active_transport)"
 preferred_tag='{{ (openwrt_transport_failover_candidates | first).outbound_tag | default('') }}'
 preferred_healthy=false
   if candidate_healthy '{{ (openwrt_transport_failover_candidates | first).type }}' \
-    "$preferred_tag" '{{ (openwrt_transport_failover_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_transport_failover_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_transport_failover_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in (openwrt_transport_failover_candidates | first).probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ (openwrt_transport_failover_candidates | first).probe_policy.required_successes | default(1) | int }}' '{{ (openwrt_transport_failover_candidates | first).probes | selectattr("expected_country", "defined") | map(attribute="expected_country") | first | default("") }}' '{{ (openwrt_transport_failover_candidates | first).endpoint.peer_public_key | default("") }}'; then
+    "$preferred_tag" '{{ (openwrt_transport_failover_candidates | first).expected_public_ip | default('') }}' '{{ (openwrt_transport_failover_candidates | first).dataplane.independent_egress_probe | default(false) | lower }}' '{{ (openwrt_transport_failover_candidates | first).probes | default([]) | map(attribute="url") | join("|") }}' '{% for probe in (openwrt_transport_failover_candidates | first).probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}' '{{ (openwrt_transport_failover_candidates | first).probe_policy.required_successes | default(1) | int }}' '{{ (openwrt_transport_failover_candidates | first).probes | selectattr("expected_country", "defined") | map(attribute="expected_country") | first | default("") }}' '{{ (openwrt_transport_failover_candidates | first).endpoint.peer_public_key | default("") }}' '{% for probe in (openwrt_transport_failover_candidates | first).probes | default([]) %}{{ ('ip:' ~ probe.expected_public_ip) if probe.expected_public_ip is defined else (('status:' ~ probe.expected_status) if probe.expected_status is defined else '') }}{% if not loop.last %}|{% endif %}{% endfor %}'; then
   preferred_healthy=true
 fi
 preferred_failures="$(state_value preferred_failures 0)"
@@ -375,6 +383,7 @@ if [ "$selected_type" = xp2p_xray ]; then
     log "transport switch requested: ${current_transport:-none} -> ${selected_tag}"
     selected_expected_ip=""
     selected_probe_urls=""
+    selected_probe_expectations=""
     selected_required_successes=1
 {% for candidate in openwrt_transport_failover_candidates if candidate.type == 'xp2p_xray' %}
     if [ "$selected_id" = '{{ candidate.id }}' ]; then
@@ -382,9 +391,10 @@ if [ "$selected_type" = xp2p_xray ]; then
       selected_probe_urls='{{ candidate.probes | default([]) | map(attribute="url") | join("|") }}'
       selected_probe_destinations='{% for probe in candidate.probes | default([]) %}{{ probe.destination_ipv4 | default(['']) | first | default('') }}{% if not loop.last %}|{% endif %}{% endfor %}'
       selected_required_successes={{ candidate.probe_policy.required_successes | default(1) | int }}
+      selected_probe_expectations='{% for probe in candidate.probes | default([]) %}{{ ('ip:' ~ probe.expected_public_ip) if probe.expected_public_ip is defined else (('status:' ~ probe.expected_status) if probe.expected_status is defined else '') }}{% if not loop.last %}|{% endif %}{% endfor %}'
     fi
 {% endfor %}
-    switch_routing_outbound "$selected_tag" "$selected_expected_ip" "$selected_probe_urls" "$selected_probe_destinations" "$selected_required_successes" || {
+    switch_routing_outbound "$selected_tag" "$selected_expected_ip" "$selected_probe_urls" "$selected_probe_destinations" "$selected_required_successes" "$selected_probe_expectations" || {
       log "failed to switch managed Xray outbound to ${selected_tag}; intercept remains unchanged"
       exit 1
     }

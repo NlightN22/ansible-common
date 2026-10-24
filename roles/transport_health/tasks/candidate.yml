@@ -33,7 +33,7 @@
           resolve_args="--resolve ${request_host}:${request_port}:${destination_ipv4}"
         fi
         # shellcheck disable=SC2086
-        curl -fsS --socks5-hostname "127.0.0.1:${socks_port}" $resolve_args --connect-timeout 8 --max-time 30 "$request_url"
+        curl -sS -L --socks5-hostname "127.0.0.1:${socks_port}" $resolve_args --connect-timeout 8 --max-time 30 -w '\n__HTTP_STATUS__=%{http_code}' "$request_url"
       else
         return 127
       fi
@@ -65,12 +65,23 @@
       expected_ip="$3"
       destination_ipv4="$4"
       expected_country="$5"
+      expected_status="$6"
       if [ "$probe_kind" = socks_http ]; then
         probe_output="$(fetch_socks_url "$probe_url" '{{ transport_health_candidate.dataplane.socks_port | default(51180) }}' "$destination_ipv4" || true)"
+        actual_status="$(printf '%s\n' "$probe_output" | sed -n 's/^__HTTP_STATUS__=//p' | tail -n 1)"
+        probe_body="$(printf '%s\n' "$probe_output" | sed '/^__HTTP_STATUS__=/d')"
+        if [ -n "$expected_status" ]; then
+          if [ "$actual_status" = "$expected_status" ]; then
+            return 0
+          fi
+          failure_reason="probe_${probe_kind}_expected_http_${expected_status}_got_${actual_status:-none}"
+          return 1
+        fi
       else
         probe_output="$(fetch_url "$probe_url" || true)"
+        probe_body="$probe_output"
       fi
-      actual_ip="$(printf '%s\n' "$probe_output" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
+      actual_ip="$(printf '%s\n' "$probe_body" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1 || true)"
       if [ -z "$actual_ip" ]; then
         failure_reason="probe_${probe_kind}_empty"
         return 1
@@ -103,7 +114,7 @@
           probe_successes=0
           probe_count=0
           {% for probe in transport_health_candidate.probes | default([]) %}
-          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' '{{ probe.destination_ipv4 | default([]) | first | default('') }}' '{{ probe.expected_country | default('') }}'; then
+          if check_egress_probe '{{ probe.type }}' '{{ probe.url | default('') }}' '{{ probe.expected_public_ip | default('') }}' '{{ probe.destination_ipv4 | default([]) | first | default('') }}' '{{ probe.expected_country | default('') }}' '{{ probe.expected_status | default('') }}'; then
             probe_successes=$((probe_successes + 1))
           fi
           probe_count=$((probe_count + 1))
