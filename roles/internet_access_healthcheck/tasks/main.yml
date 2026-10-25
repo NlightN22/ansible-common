@@ -83,38 +83,45 @@
       exit 1
     fi
 
-    printf '%s\n' "$domains" | while read -r domain; do
+    failures=0
+    for domain in $domains; do
       [ -n "$domain" ] || continue
       ip="$(resolve_domain "$domain" || true)"
       if [ -z "$ip" ]; then
         echo "DNS_FAILED layer=$layer resource=$resource_id domain=$domain"
-        exit 1
+        failures=1
+        continue
       fi
       route="$(ip route get "$ip" 2>&1 || true)"
       if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
         echo "ROUTE_DECISION_FAILED layer=$layer resource=$resource_id domain=$domain ip=$ip route=$route"
-        exit 1
+        failures=1
+        continue
       fi
       check_tcp "$domain" "$port" >/dev/null || {
         echo "TCP_ACCESS_FAILED layer=$layer resource=$resource_id domain=$domain port=$port ip=$ip route=$route"
-        exit 1
+        failures=1
+        continue
       }
       echo "ROUTER_OK layer=$layer resource=$resource_id domain=$domain ip=$ip route=$(printf '%s' "$route" | tr '\n' ' ')"
     done
 
-    printf '%s\n' "$ipv4_cidrs" | while read -r cidr; do
+    for cidr in $ipv4_cidrs; do
       [ -n "$cidr" ] || continue
       target="${cidr%%/*}"
       route="$(ip route get "$target" 2>&1 || true)"
       if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
         echo "CIDR_ROUTE_DECISION_FAILED layer=$layer resource=$resource_id cidr=$cidr route=$route"
-        exit 1
+        failures=1
+        continue
       fi
       echo "ROUTER_ROUTE_OK layer=$layer resource=$resource_id cidr=$cidr route=$(printf '%s' "$route" | tr '\n' ' ')"
     done
+    [ "$failures" -eq 0 ]
   register: internet_access_healthcheck_router_result
   changed_when: false
   failed_when: false
+  ignore_unreachable: true
   loop: "{{ internet_access_healthcheck_resources }}"
   loop_control:
     label: "{{ item.layer }}:{{ item.resource_id }}"
@@ -190,39 +197,46 @@
       exit 1
     fi
 
-    printf '%s\n' "$domains" | while read -r domain; do
+    failures=0
+    for domain in $domains; do
       [ -n "$domain" ] || continue
       ip="$(resolve_domain "$domain" || true)"
       if [ -z "$ip" ]; then
         echo "LAN_PROBE_DNS_FAILED layer=$layer resource=$resource_id domain=$domain"
-        exit 1
+        failures=1
+        continue
       fi
       route="$(ip route get "$ip" 2>&1 || true)"
       if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
         echo "LAN_PROBE_ROUTE_DECISION_FAILED layer=$layer resource=$resource_id domain=$domain ip=$ip route=$route"
-        exit 1
+        failures=1
+        continue
       fi
       check_tcp "$domain" "$port" >/dev/null || {
         echo "LAN_PROBE_TCP_ACCESS_FAILED layer=$layer resource=$resource_id domain=$domain port=$port ip=$ip route=$route"
-        exit 1
+        failures=1
+        continue
       }
       echo "LAN_PROBE_OK layer=$layer resource=$resource_id domain=$domain port=$port ip=$ip route=$(printf '%s' "$route" | tr '\n' ' ')"
     done
 
-    printf '%s\n' "$ipv4_cidrs" | while read -r cidr; do
+    for cidr in $ipv4_cidrs; do
       [ -n "$cidr" ] || continue
       target="${cidr%%/*}"
       route="$(ip route get "$target" 2>&1 || true)"
       if ! printf '%s\n' "$route" | grep -Eq '(^|[[:space:]])dev[[:space:]]+'; then
         echo "LAN_PROBE_CIDR_ROUTE_DECISION_FAILED layer=$layer resource=$resource_id cidr=$cidr route=$route"
-        exit 1
+        failures=1
+        continue
       fi
       echo "LAN_PROBE_ROUTE_OK layer=$layer resource=$resource_id cidr=$cidr route=$(printf '%s' "$route" | tr '\n' ' ')"
     done
+    [ "$failures" -eq 0 ]
   register: internet_access_healthcheck_lan_probe_result
   changed_when: false
   failed_when: false
   delegate_to: "{{ internet_access_healthcheck_lan_probe.host }}"
+  ignore_unreachable: true
   loop: "{{ internet_access_healthcheck_resources }}"
   loop_control:
     label: "{{ item.layer }}:{{ item.resource_id }}"
@@ -246,6 +260,8 @@
   loop: "{{ internet_access_healthcheck_lan_probe_result.results | default([]) }}"
   loop_control:
     label: "{{ item.item.layer }}:{{ item.item.resource_id }}"
+  ignore_errors: true
+  ignore_unreachable: true
   when:
     - internet_access_healthcheck_lan_probe_result is defined
     - item.rc | default(0) | int != 0
