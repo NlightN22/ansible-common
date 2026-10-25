@@ -4,7 +4,6 @@ xp2p_dat_refresh_force: false
 xp2p_dat_refresh_max_age_days: 14
 xp2p_dat_refresh_verify_socks: false
 xp2p_dat_refresh_restart_service: false
-xp2p_dat_refresh_service_name: xp2p-client
 xp2p_dat_refresh_transfer_timeout_seconds: 300
 xp2p_dat_refresh_ssh_extra_args:
   - -o

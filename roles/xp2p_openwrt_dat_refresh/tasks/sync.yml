@@ -5,13 +5,14 @@
       - xp2p_dat_refresh_model.id | default('') | length > 0
       - xp2p_dat_refresh_model.remote_dat_dir | default('') | length > 0
       - xp2p_dat_refresh_model.dat_files | default([]) | length > 0
+      - xp2p_dat_refresh_model.dat_files | selectattr('checksum_url', 'defined') | list | length == xp2p_dat_refresh_model.dat_files | length
     fail_msg: "XP2P dat refresh model must define id, remote_dat_dir, and dat_files."
     quiet: true
 
 - name: Collect local XP2P dat file state
   ansible.builtin.stat:
     path: "{{ xp2p_dat_refresh_cache_dir }}/{{ xp2p_dat_refresh_model.id }}/{{ item.name }}"
-    checksum_algorithm: md5
+    checksum_algorithm: sha256
     get_checksum: true
     get_mime: false
   register: xp2p_dat_refresh_local_dat_sync
@@ -42,7 +43,7 @@
     file='{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}'
     if [ -s "$file" ]; then
       size="$(wc -c < "$file" | tr -d ' ')"
-      checksum="$(md5sum "$file" 2>/dev/null | awk '{print $1}')"
+      checksum="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
       printf '%s %s\n' "$size" "$checksum"
     fi
   register: xp2p_dat_refresh_remote_dat_sync
@@ -51,20 +52,17 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Copy changed or stale XP2P dat files to router
+- name: Transfer changed XP2P dat files to router staging path
   ansible.builtin.shell: |
     set -eu
     local_file={{ (xp2p_dat_refresh_cache_dir ~ '/' ~ xp2p_dat_refresh_model.id ~ '/' ~ item.name) | quote }}
-    remote_file={{ (xp2p_dat_refresh_model.remote_dat_dir ~ '/' ~ item.name) | quote }}
-    remote_tmp="${remote_file}.ansible.$$"
+    remote_file={{ (xp2p_dat_refresh_model.remote_dat_dir ~ '/.' ~ item.name ~ '.ansible-staging') | quote }}
     remote_target={{ ((ansible_user | default('root')) ~ '@' ~ (ansible_host | default(inventory_hostname))) | quote }}
-    cat "$local_file" |
-      timeout {{ xp2p_dat_refresh_transfer_timeout_seconds | int }} ssh \
-        {% for arg in xp2p_dat_refresh_ssh_extra_args %}{{ arg | quote }} {% endfor %}\
-        {% if ansible_ssh_private_key_file | default('') | length > 0 %}-i {{ ansible_ssh_private_key_file | quote }} {% endif %}\
-        -p {{ ansible_port | default(22) | quote }} \
-        "$remote_target" \
-        "cat > '$remote_tmp' && mv '$remote_tmp' '$remote_file'"
+    timeout {{ xp2p_dat_refresh_transfer_timeout_seconds | int }} scp \
+      {% for arg in xp2p_dat_refresh_scp_extra_args %}{{ arg | quote }} {% endfor %}\
+      {% if ansible_ssh_private_key_file | default('') | length > 0 %}-i {{ ansible_ssh_private_key_file | quote }} {% endif %}\
+      -P {{ ansible_port | default(22) | quote }} \
+      "$local_file" "$remote_target:$remote_file"
   loop: "{{ xp2p_dat_refresh_model.dat_files }}"
   loop_control:
     index_var: xp2p_dat_refresh_dat_index
@@ -72,7 +70,6 @@
   vars:
     xp2p_dat_refresh_remote_parts: "{{ xp2p_dat_refresh_remote_dat_sync.results[xp2p_dat_refresh_dat_index].stdout.split() }}"
     xp2p_dat_refresh_local_stat: "{{ xp2p_dat_refresh_local_dat_sync.results[xp2p_dat_refresh_dat_index].stat }}"
-  changed_when: true
   delegate_to: localhost
   when: >-
     not (xp2p_dat_refresh_skip_sync | default(false) | bool)
@@ -83,6 +80,56 @@
       or (xp2p_dat_refresh_remote_parts[0] | int) != (xp2p_dat_refresh_local_stat.size | int)
       or xp2p_dat_refresh_remote_parts[1] != xp2p_dat_refresh_local_stat.checksum
     )
+
+- name: Verify staged XP2P dat SHA-256 on router and atomically promote file
+  ansible.builtin.raw: |
+    set -eu
+    staged='{{ xp2p_dat_refresh_model.remote_dat_dir }}/.{{ item.name }}.ansible-staging'
+    final='{{ xp2p_dat_refresh_model.remote_dat_dir }}/{{ item.name }}'
+    expected='{{ xp2p_dat_refresh_local_stat.checksum }}'
+    expected_size='{{ xp2p_dat_refresh_local_stat.size | int }}'
+    test "$(wc -c < "$staged" | tr -d ' ')" = "$expected_size"
+    printf '%s  %s\n' "$expected" "$staged" | sha256sum -c -
+    mv -f "$staged" "$final"
+    test "$(wc -c < "$final" | tr -d ' ')" = "$expected_size"
+    printf '%s  %s\n' "$expected" "$final" | sha256sum -c -
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    index_var: xp2p_dat_refresh_dat_index
+    label: "{{ item.name }}"
+  vars:
+    xp2p_dat_refresh_remote_parts: "{{ xp2p_dat_refresh_remote_dat_sync.results[xp2p_dat_refresh_dat_index].stdout.split() }}"
+    xp2p_dat_refresh_local_stat: "{{ xp2p_dat_refresh_local_dat_sync.results[xp2p_dat_refresh_dat_index].stat }}"
+  register: xp2p_dat_refresh_verified_updates
+  changed_when: true
+  when: >-
+    not (xp2p_dat_refresh_skip_sync | default(false) | bool)
+    and (
+      xp2p_dat_refresh_force | bool
+      or (xp2p_dat_refresh_remote_parts | length) < 2
+      or (xp2p_dat_refresh_remote_parts[0] | int) <= 0
+      or (xp2p_dat_refresh_remote_parts[0] | int) != (xp2p_dat_refresh_local_stat.size | int)
+      or xp2p_dat_refresh_remote_parts[1] != xp2p_dat_refresh_local_stat.checksum
+    )
+
+- name: Remove leftover XP2P dat staging files
+  ansible.builtin.raw: >-
+    rm -f '{{ xp2p_dat_refresh_model.remote_dat_dir }}/.{{ item.name }}.ansible-staging'
+  changed_when: false
+  loop: "{{ xp2p_dat_refresh_model.dat_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not (xp2p_dat_refresh_skip_sync | default(false) | bool)
+
+- name: Restart XP2P client after verified dat files changed
+  ansible.builtin.raw: "xp2p client service restart"
+  when:
+    - xp2p_dat_refresh_restart_service | bool
+    - >-
+      xp2p_dat_refresh_verified_updates.results | default([])
+      | selectattr('changed', 'defined')
+      | selectattr('changed', 'equalto', true)
+      | list | length > 0
 
 - name: Refresh remote XP2P dat mtime when content is current
   ansible.builtin.raw: |

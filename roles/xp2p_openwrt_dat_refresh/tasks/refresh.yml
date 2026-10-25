@@ -21,6 +21,3 @@
     - xp2p_dat_refresh_verify_socks | bool
     - xp2p_dat_refresh_socks_smoke.rc | default(0) | int != 0
 
-- name: Restart XP2P service after explicit dat refresh request
-  ansible.builtin.raw: "/etc/init.d/{{ xp2p_dat_refresh_service_name }} restart"
-  when: xp2p_dat_refresh_restart_service | bool
